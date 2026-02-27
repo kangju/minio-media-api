@@ -1,0 +1,20 @@
+# 環境変数（秘密情報を含むため除外）
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Docker
+.dockerignore
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
