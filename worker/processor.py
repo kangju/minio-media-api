@@ -4,8 +4,11 @@ API コード (app/) を一切インポートしない独立モジュール。
 DB アクセスは SQLAlchemy text() による生 SQL で行う。
 """
 
+import functools
 import io
+import json
 import logging
+import pathlib
 import threading
 from typing import Optional
 
@@ -128,11 +131,36 @@ def _get_media_info(media_id: int) -> Optional[dict]:
     return {"minio_key": row[0], "retry_count": row[1]}
 
 
+@functools.lru_cache(maxsize=None)
+def _load_default_vocabulary() -> list[str]:
+    """デフォルトタグ語彙を JSON ファイルから読み込む。プロセス起動時に1回だけ実行される。"""
+    vocab_path = pathlib.Path(__file__).parent / "data" / "default_tags.json"
+    try:
+        return json.loads(vocab_path.read_text(encoding="utf-8"))["vocabulary"]
+    except Exception as exc:
+        logger.warning("デフォルト語彙の読み込みに失敗しました: %s", exc)
+        return []
+
+
 def _get_all_tag_names() -> list[str]:
-    """DB に登録されているすべてのタグ名を返す。"""
+    """DB タグ + デフォルト語彙を重複なしで返す。
+
+    DB にタグが存在しない場合でもデフォルト語彙（209 件）を候補として使用する。
+    これにより、新規 DB でも CLIP 解析が正常に実行される。
+    """
     with engine.connect() as conn:
         rows = conn.execute(text("SELECT name FROM tags")).fetchall()
-    return [r[0] for r in rows]
+    db_tags = [r[0] for r in rows]
+
+    vocab = _load_default_vocabulary()
+
+    seen: set[str] = set()
+    candidates: list[str] = []
+    for name in db_tags + vocab:
+        if name not in seen:
+            seen.add(name)
+            candidates.append(name)
+    return candidates
 
 
 def _set_status(media_id: int, status: str,
@@ -188,8 +216,13 @@ def _save_clip_tags(media_id: int, clip_results: list[dict]) -> None:
                 text("""
                     INSERT INTO media_tags (media_id, tag_id, source, score)
                     VALUES (:mid, :tid, 'clip', :score)
-                    ON CONFLICT (media_id, tag_id, source) DO UPDATE
-                    SET score = EXCLUDED.score
+                    ON CONFLICT (media_id, tag_id) DO UPDATE
+                    SET
+                        source = CASE
+                            WHEN media_tags.source = 'user'::tagsourceenum THEN 'user'::tagsourceenum
+                            ELSE 'clip'::tagsourceenum
+                        END,
+                        score = EXCLUDED.score
                 """),
                 {"mid": media_id, "tid": tag_id, "score": score},
             )

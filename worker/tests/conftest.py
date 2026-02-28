@@ -84,10 +84,10 @@ def insert_media(db_engine, minio_key: str = None, clip_status: str = "pending",
             text("""
                 INSERT INTO media
                   (original_filename, minio_key, file_hash, media_type,
-                   clip_status, retry_count, created_at, updated_at)
+                   clip_status, retry_count, created_at)
                 VALUES
                   (:fname, :key, :hash, 'image',
-                   :status, :retry, now(), now())
+                   :status, :retry, now())
                 RETURNING id
             """),
             {
@@ -100,3 +100,29 @@ def insert_media(db_engine, minio_key: str = None, clip_status: str = "pending",
         ).fetchone()
         conn.commit()
     return row[0]
+
+
+def upload_test_image(minio_client, key: str) -> str:
+    """MinIO にテスト用 JPEG をアップロードして key を返す。"""
+    jpeg = make_test_jpeg()
+    minio_client.put_object(
+        settings.minio_bucket, key, io.BytesIO(jpeg), length=len(jpeg),
+        content_type="image/jpeg",
+    )
+    return key
+
+
+@pytest.fixture
+def mock_clip_model():
+    """CLIP モデルをモックする fixture。テストクラス間で共有する。"""
+    from unittest.mock import MagicMock
+    import processor
+    processor._model = MagicMock()
+    processor._tokenizer = MagicMock(return_value=MagicMock())
+    processor._preprocess = MagicMock(
+        return_value=MagicMock(unsqueeze=lambda x: MagicMock())
+    )
+    yield
+    processor._model = None
+    processor._tokenizer = None
+    processor._preprocess = None

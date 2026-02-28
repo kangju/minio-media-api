@@ -94,9 +94,10 @@ export default function Home() {
     const timer = setInterval(() => {
       offsetRef.current = 0;
       fetchMedia(true);
+      fetchTags();
     }, 5000);
     return () => clearInterval(timer);
-  }, [items, fetchMedia]);
+  }, [items, fetchMedia, fetchTags]);
 
   // Infinite scroll
   useEffect(() => {

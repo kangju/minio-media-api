@@ -3,7 +3,6 @@
 実際の PostgreSQL・MinIO・CLIP モデルを使用する。
 """
 
-import io
 import uuid
 from unittest.mock import MagicMock, patch
 
@@ -11,12 +10,13 @@ import pytest
 from sqlalchemy import text
 
 from processor import (
+    _get_all_tag_names,
     _get_media_info,
     claim_pending,
     reset_running,
     run_clip_task,
 )
-from conftest import insert_media, make_test_jpeg
+from conftest import insert_media, make_test_jpeg, upload_test_image
 
 
 # ---------------------------------------------------------------------------
@@ -115,33 +115,13 @@ class TestRunClipTask:
     """run_clip_task(): CLIP タスク実行フローのテスト。"""
 
     @pytest.fixture(autouse=True)
-    def _setup_model(self):
-        """テスト用のモック CLIP モデルをセットアップ。"""
-        import processor
-        # モデルがロード済みのふりをする
-        processor._model = MagicMock()
-        processor._tokenizer = MagicMock(return_value=MagicMock())
-        processor._preprocess = MagicMock(
-            return_value=MagicMock(unsqueeze=lambda x: MagicMock())
-        )
-        yield
-        processor._model = None
-        processor._tokenizer = None
-        processor._preprocess = None
-
-    def _upload_test_image(self, minio_client, key: str) -> str:
-        """MinIO にテスト画像をアップロードして key を返す。"""
-        jpeg = make_test_jpeg()
-        minio_client.put_object(
-            "media", key, io.BytesIO(jpeg), length=len(jpeg),
-            content_type="image/jpeg"
-        )
-        return key
+    def _setup_model(self, mock_clip_model):
+        """共通 mock_clip_model fixture を autouse で適用する。"""
 
     def test_success(self, db_engine, minio_client):
         """正常系: CLIP 解析成功で clip_status='done' になること。"""
         key = f"test/{uuid.uuid4()}.jpg"
-        self._upload_test_image(minio_client, key)
+        upload_test_image(minio_client, key)
         mid = insert_media(db_engine, minio_key=key, clip_status="running")
 
         # タグを1件 DB に入れておく
@@ -194,7 +174,7 @@ class TestRunClipTask:
     def test_clip_error_increments_retry(self, db_engine, minio_client):
         """CLIP 推論エラーで retry_count が増加し pending に戻ること。"""
         key = f"test/{uuid.uuid4()}.jpg"
-        self._upload_test_image(minio_client, key)
+        upload_test_image(minio_client, key)
         mid = insert_media(db_engine, minio_key=key, clip_status="running", retry_count=0)
 
         with patch("processor._analyze", side_effect=RuntimeError("CLIP error")):
@@ -215,7 +195,7 @@ class TestRunClipTask:
     def test_tags_saved_on_success(self, db_engine, minio_client):
         """成功時に CLIP タグが保存されること。"""
         key = f"test/{uuid.uuid4()}.jpg"
-        self._upload_test_image(minio_client, key)
+        upload_test_image(minio_client, key)
         mid = insert_media(db_engine, minio_key=key, clip_status="running")
 
         with db_engine.connect() as conn:
@@ -235,3 +215,140 @@ class TestRunClipTask:
                 {"mid": mid}
             ).scalar()
         assert count == 1
+
+
+# ---------------------------------------------------------------------------
+# TestGetAllTagNames
+# ---------------------------------------------------------------------------
+
+class TestGetAllTagNames:
+    """_get_all_tag_names(): DB + デフォルト語彙マージのテスト。"""
+
+    def test_returns_vocab_when_db_empty(self, db_engine):
+        """DB にタグがない場合でもデフォルト語彙が返ること（Issue #4 主要修正）。"""
+        names = _get_all_tag_names()
+        assert len(names) > 0, "DB が空でもデフォルト語彙が返ること"
+
+    def test_includes_db_tags(self, db_engine):
+        """DB に登録したカスタムタグが候補に含まれること。"""
+        with db_engine.connect() as conn:
+            conn.execute(
+                text("INSERT INTO tags (name, created_at) VALUES ('my_custom_tag_xyz', now())")
+            )
+            conn.commit()
+        names = _get_all_tag_names()
+        assert "my_custom_tag_xyz" in names
+
+    def test_no_duplicates(self, db_engine):
+        """DB タグと語彙に重複があっても候補は重複なしであること。"""
+        # 語彙ファイルに存在するタグ "cat" を DB にも入れる
+        with db_engine.connect() as conn:
+            conn.execute(
+                text("INSERT INTO tags (name, created_at) VALUES ('cat', now()) ON CONFLICT (name) DO NOTHING")
+            )
+            conn.commit()
+        names = _get_all_tag_names()
+        assert names.count("cat") == 1
+
+
+# ---------------------------------------------------------------------------
+# TestRunClipTask (追加: Issue #4 修正確認)
+# ---------------------------------------------------------------------------
+
+class TestRunClipTaskVocabFix:
+    """Issue #4 修正: DB タグ空でも語彙経由でタグが保存されること。"""
+
+    @pytest.fixture(autouse=True)
+    def _setup_model(self, mock_clip_model):
+        """共通 mock_clip_model fixture を autouse で適用する。"""
+
+    def test_tags_saved_with_empty_db_tags_using_vocab(self, db_engine, minio_client):
+        """DB にタグがなくてもデフォルト語彙から CLIP タグが保存されること。"""
+        key = f"test/{uuid.uuid4()}.jpg"
+        upload_test_image(minio_client, key)
+        mid = insert_media(db_engine, minio_key=key, clip_status="running")
+
+        # DB のタグは空のまま実行（語彙ファイルの "cat" がヒット）
+        with patch("processor._analyze", return_value=[{"name": "cat", "score": 0.88}]):
+            run_clip_task(mid)
+
+        with db_engine.connect() as conn:
+            status = conn.execute(
+                text("SELECT clip_status FROM media WHERE id = :id"), {"id": mid}
+            ).scalar()
+            tag_count = conn.execute(
+                text("""
+                    SELECT COUNT(*) FROM media_tags mt
+                    JOIN tags t ON t.id = mt.tag_id
+                    WHERE mt.media_id = :mid AND mt.source = 'clip'
+                """),
+                {"mid": mid},
+            ).scalar()
+        assert status == "done"
+        assert tag_count == 1, "語彙から CLIP タグが1件保存されること"
+
+
+# ---------------------------------------------------------------------------
+# TestSaveClipTags
+# ---------------------------------------------------------------------------
+
+class TestSaveClipTags:
+    """_save_clip_tags(): ON CONFLICT 動作とユーザータグ保護のテスト。"""
+
+    @pytest.fixture(autouse=True)
+    def _setup_model(self, mock_clip_model):
+        """共通 mock_clip_model fixture を autouse で適用する。"""
+
+    def test_user_source_preserved_on_conflict(self, db_engine, minio_client):
+        """ユーザーが手動タグ付け済みのタグを CLIP が解析したとき、
+        source='user' が維持され score だけ CLIP 値で更新されること。"""
+        key = f"test/{uuid.uuid4()}.jpg"
+        upload_test_image(minio_client, key)
+        mid = insert_media(db_engine, minio_key=key, clip_status="running")
+
+        # 事前にユーザーが 'cat' をタグ付け
+        with db_engine.connect() as conn:
+            conn.execute(text("INSERT INTO tags (name, created_at) VALUES ('cat', now()) ON CONFLICT (name) DO NOTHING"))
+            tag_id = conn.execute(text("SELECT id FROM tags WHERE name = 'cat'")).scalar()
+            conn.execute(
+                text("INSERT INTO media_tags (media_id, tag_id, source, score) VALUES (:mid, :tid, 'user', NULL)"),
+                {"mid": mid, "tid": tag_id},
+            )
+            conn.commit()
+
+        # CLIP が同じ 'cat' タグをスコア 0.9 でヒット
+        with patch("processor._analyze", return_value=[{"name": "cat", "score": 0.9}]):
+            run_clip_task(mid)
+
+        with db_engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT source, score FROM media_tags WHERE media_id = :mid AND tag_id = :tid"),
+                {"mid": mid, "tid": tag_id},
+            ).fetchone()
+
+        assert row[0] == "user", "ユーザータグの source は 'user' のままであること"
+        assert row[1] == pytest.approx(0.9), "CLIP スコアが score カラムに更新されること"
+
+    def test_new_clip_tag_inserted_when_no_conflict(self, db_engine, minio_client):
+        """既存タグがない場合は source='clip' で新規挿入されること。"""
+        key = f"test/{uuid.uuid4()}.jpg"
+        upload_test_image(minio_client, key)
+        mid = insert_media(db_engine, minio_key=key, clip_status="running")
+
+        with patch("processor._analyze", return_value=[{"name": "dog", "score": 0.85}]):
+            run_clip_task(mid)
+
+        with db_engine.connect() as conn:
+            row = conn.execute(
+                text("""
+                    SELECT mt.source, mt.score
+                    FROM media_tags mt
+                    JOIN tags t ON t.id = mt.tag_id
+                    WHERE mt.media_id = :mid AND t.name = 'dog'
+                """),
+                {"mid": mid},
+            ).fetchone()
+
+        assert row is not None, "CLIP タグが保存されていること"
+        assert row[0] == "clip"
+        assert row[1] == pytest.approx(0.85)
