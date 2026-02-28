@@ -98,18 +98,22 @@ def get_media_list(
 def create_media(
     db: Session,
     original_filename: str,
-    minio_key: str,
+    minio_key: Optional[str],
     file_hash: str,
     media_type: str,
+    clip_status: str = "pending",
+    error_detail: Optional[str] = None,
 ) -> Media:
     """メディアレコードを作成する。
 
     Args:
         db: データベースセッション。
         original_filename: 元のファイル名。
-        minio_key: MinIO 上のオブジェクトキー。
+        minio_key: MinIO 上のオブジェクトキー。アップロード失敗時は None。
         file_hash: ファイルの SHA256 ハッシュ値。
         media_type: メディアタイプ（'image' または 'video'）。
+        clip_status: 初期 CLIP ステータス（デフォルト 'pending'）。
+        error_detail: エラー詳細メッセージ（失敗時に設定）。
 
     Returns:
         Media: 作成されたメディアオブジェクト。
@@ -119,6 +123,8 @@ def create_media(
         minio_key=minio_key,
         file_hash=file_hash,
         media_type=media_type,
+        clip_status=clip_status,
+        error_detail=error_detail,
     )
     db.add(media)
     db.commit()
@@ -224,7 +230,7 @@ def get_all_tags(db: Session) -> list[dict]:
         select(Tag, func.count(MediaTag.media_id).label("media_count"))
         .outerjoin(MediaTag, Tag.id == MediaTag.tag_id)
         .group_by(Tag.id)
-        .order_by(Tag.name)
+        .order_by(func.count(MediaTag.media_id).desc())
     )
     rows = db.execute(stmt).all()
     return [
@@ -355,3 +361,52 @@ def update_clip_tags(
 
     # 新しい CLIP タグを追加
     add_tags_to_media(db, media_id, clip_tags, source="clip")
+
+
+def update_clip_status(
+    db: Session,
+    media_id: int,
+    status: str,
+    error_detail: Optional[str] = None,
+    retry_count: Optional[int] = None,
+) -> None:
+    """メディアのCLIPステータスを更新する。
+
+    Args:
+        db: データベースセッション。
+        media_id: 対象メディアのID。
+        status: 新しいステータス（'pending' / 'running' / 'done' / 'error'）。
+        error_detail: エラー詳細メッセージ（'error' ステータス時に設定）。
+        retry_count: リトライ回数（指定時に更新）。
+    """
+    stmt = select(Media).where(Media.id == media_id)
+    media = db.execute(stmt).scalar_one_or_none()
+    if media:
+        media.clip_status = status
+        if error_detail is not None:
+            media.error_detail = error_detail
+        if retry_count is not None:
+            media.retry_count = retry_count
+        db.commit()
+
+
+def reset_running_media(db: Session) -> int:
+    """clip_status='running' のメディアを 'pending' にリセットする。
+
+    コンテナ再起動時に中断されたタスクを再実行可能な状態に戻す。
+
+    Args:
+        db: データベースセッション。
+
+    Returns:
+        int: リセットされたレコード数。
+    """
+    from sqlalchemy import update as sa_update
+
+    result = db.execute(
+        sa_update(Media)
+        .where(Media.clip_status == "running")
+        .values(clip_status="pending")
+    )
+    db.commit()
+    return result.rowcount

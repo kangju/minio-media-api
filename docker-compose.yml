@@ -50,6 +50,30 @@ services:
       retries: 5
       start_period: 10s
 
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - BACKEND_URL=http://api:8000
+    depends_on:
+      - api
+
+  clip-worker:
+    build:
+      context: ./worker
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes:
+      - model_cache:/root/.cache
+    restart: unless-stopped
+
 volumes:
   minio_data:
   postgres_data:

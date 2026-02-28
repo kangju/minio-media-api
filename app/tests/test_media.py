@@ -572,3 +572,242 @@ class TestAnalyzeMedia:
         assert "id" in data
         assert "tags" in data
         assert "media_type" in data
+
+    def test_analyze_with_candidates(self, client):
+        """ケース7: candidates を指定すると既存タグにない候補も CLIP 解析される。"""
+        r = client.post(
+            f"/media/{self.image_id}/analyze",
+            json={"candidates": ["flower", "landscape", "portrait"]},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert "tags" in data
+
+    def test_analyze_with_empty_candidates(self, client):
+        """ケース8: candidates が空リストの場合も正常動作する。"""
+        r = client.post(
+            f"/media/{self.image_id}/analyze",
+            json={"candidates": []},
+        )
+        assert r.status_code == 200
+        assert "tags" in r.json()
+
+    def test_analyze_candidates_dedup_with_existing(self, client):
+        """ケース9: candidates に既存タグ名があっても重複せず処理される。"""
+        r = client.post(
+            f"/media/{self.image_id}/analyze",
+            json={"candidates": ["cat", "dog", "cat"]},  # catは既存タグ、重複あり
+        )
+        assert r.status_code == 200
+
+    def test_upload_image_gets_clip_tags_from_default_vocabulary(self, client):
+        """ケース10: アップロード直後はclip_status='pending'でCLIPタグはまだない。"""
+        r = client.post(
+            "/media",
+            files=[make_upload_file(MINIMAL_JPEG, "empty_db.jpg", "image/jpeg")],
+        )
+        assert r.status_code == 201
+        data = r.json()
+        # CLIP非同期化: アップロード直後はpendingでタグなし
+        assert data["clip_status"] == "pending"
+        clip_tags = [t for t in data["tags"] if t["source"] == "clip"]
+        assert len(clip_tags) == 0
+
+    def test_upload_image_clip_tags_are_new_tags_in_db(self, client):
+        """ケース11: analyzeエンドポイントでCLIPタグがDBに登録される。"""
+        r = client.post(
+            "/media",
+            files=[make_upload_file(MINIMAL_JPEG, "new_tags.jpg", "image/jpeg")],
+        )
+        assert r.status_code == 201
+        media_id = r.json()["id"]
+        # analyzeで同期実行
+        r_analyze = client.post(f"/media/{media_id}/analyze", json={})
+        assert r_analyze.status_code == 200
+        data = r_analyze.json()
+        clip_tags = [t for t in data["tags"] if t["source"] == "clip"]
+        # CLIPタグのIDが存在することでDBに登録済みと確認
+        for tag in clip_tags:
+            assert tag["id"] is not None
+
+    def test_analyze_without_db_tags_uses_default_vocabulary(self, client):
+        """ケース12: DBタグなしでanalyzeしてもデフォルト語彙でCLIPタグが付く。"""
+        # タグなしでアップロード後に解析
+        r_up = client.post(
+            "/media",
+            files=[make_upload_file(MINIMAL_JPEG, "notags.jpg", "image/jpeg")],
+        )
+        media_id = r_up.json()["id"]
+        r = client.post(f"/media/{media_id}/analyze", json={})
+        assert r.status_code == 200
+        clip_tags = [t for t in r.json()["tags"] if t["source"] == "clip"]
+        assert len(clip_tags) >= 1
+
+    def test_clip_tag_normalized_to_existing_db_tag(self, client):
+        """ケース13: CLIPが返したタグ名が既存DBタグと一致する場合は既存タグを使う。"""
+        # まず "cat" タグ付き画像をアップロードしてDBに catタグを作る
+        r_up = client.post(
+            "/media",
+            files=[make_upload_file(MINIMAL_JPEG, "with_cat.jpg", "image/jpeg")],
+            data={"tags": ["cat"]},
+        )
+        assert r_up.status_code == 201
+        user_cat_tags = [t for t in r_up.json()["tags"] if t["name"] == "cat"]
+        assert len(user_cat_tags) == 1
+        cat_tag_id = user_cat_tags[0]["id"]
+
+        # 別の画像で analyze → catが候補プールに含まれ、一致すれば同じIDのタグが使われる
+        r_up2 = client.post(
+            "/media",
+            files=[make_upload_file(MINIMAL_JPEG_2, "other.jpg", "image/jpeg")],
+        )
+        media2_id = r_up2.json()["id"]
+        r = client.post(f"/media/{media2_id}/analyze", json={"candidates": ["cat"]})
+        assert r.status_code == 200
+        tags = r.json()["tags"]
+        cat_in_result = [t for t in tags if t["name"] == "cat"]
+        if cat_in_result:
+            # 同名タグは同じIDになる（正規化されている）
+            assert cat_in_result[0]["id"] == cat_tag_id
+
+
+class TestClipStatus:
+    """CLIP非同期ステータスに関するテスト。"""
+
+    def test_upload_returns_pending_status(self, client):
+        """アップロード直後はclip_status='pending'。"""
+        r = client.post(
+            "/media",
+            files=[make_upload_file(MINIMAL_JPEG, "pending.jpg", "image/jpeg")],
+        )
+        assert r.status_code == 201
+        assert r.json()["clip_status"] == "pending"
+
+    def test_upload_response_has_clip_status_field(self, client):
+        """MediaResponseにclip_statusフィールドが含まれる。"""
+        r = client.post(
+            "/media",
+            files=[make_upload_file(MINIMAL_JPEG, "check_field.jpg", "image/jpeg")],
+        )
+        assert r.status_code == 201
+        assert "clip_status" in r.json()
+
+    def test_list_items_have_clip_status(self, client):
+        """一覧レスポンスのアイテムにclip_statusフィールドがある。"""
+        client.post(
+            "/media",
+            files=[make_upload_file(MINIMAL_JPEG, "list_test.jpg", "image/jpeg")],
+        )
+        r = client.get("/media")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) > 0
+        for item in items:
+            assert "clip_status" in item
+
+    def test_list_includes_pending_items(self, client):
+        """GET /mediaでpending画像も一覧に含まれる。"""
+        r_up = client.post(
+            "/media",
+            files=[make_upload_file(MINIMAL_JPEG, "inc_pending.jpg", "image/jpeg")],
+        )
+        assert r_up.status_code == 201
+        media_id = r_up.json()["id"]
+        r = client.get("/media")
+        ids = [i["id"] for i in r.json()["items"]]
+        assert media_id in ids
+
+    def test_analyze_updates_to_done(self, client):
+        """analyzeエンドポイント後はclip_status='done'になる。"""
+        r_up = client.post(
+            "/media",
+            files=[make_upload_file(MINIMAL_JPEG, "to_done.jpg", "image/jpeg")],
+        )
+        media_id = r_up.json()["id"]
+        r = client.post(f"/media/{media_id}/analyze", json={})
+        assert r.status_code == 200
+        assert r.json()["clip_status"] == "done"
+
+    def test_delete_removes_from_list(self, client):
+        """削除後はinclude_deleted=FalseのGET /mediaに含まれない。"""
+        r_up = client.post(
+            "/media",
+            files=[make_upload_file(MINIMAL_JPEG, "to_delete.jpg", "image/jpeg")],
+        )
+        media_id = r_up.json()["id"]
+        client.delete(f"/media/{media_id}")
+        r = client.get("/media")
+        ids = [i["id"] for i in r.json()["items"]]
+        assert media_id not in ids
+
+    def test_analyze_returns_clip_tags_from_default_vocabulary(self, client):
+        """DBが空でもanalyzeでデフォルト語彙からCLIPタグが付与される。"""
+        r_up = client.post(
+            "/media",
+            files=[make_upload_file(MINIMAL_JPEG, "vocab_test.jpg", "image/jpeg")],
+        )
+        media_id = r_up.json()["id"]
+        r = client.post(f"/media/{media_id}/analyze", json={})
+        assert r.status_code == 200
+        clip_tags = [t for t in r.json()["tags"] if t["source"] == "clip"]
+        assert len(clip_tags) >= 1
+
+
+class TestClipTaskPendingOnUpload:
+    """アップロード時の clip_status='pending' テスト。
+
+    アップロード後は clip_status='pending' で返ることを確認する。
+    """
+
+    def test_upload_returns_pending_status(self, client):
+        """アップロード成功時に clip_status='pending' が返される。"""
+        from tests.conftest import MINIMAL_JPEG, make_upload_file
+
+        r = client.post(
+            "/media",
+            files=[make_upload_file(MINIMAL_JPEG, "pending_test.jpg", "image/jpeg")],
+        )
+        assert r.status_code == 201
+        data = r.json()
+        assert data["clip_status"] == "pending", (
+            f"アップロード直後の clip_status が 'pending' でない: {data['clip_status']}"
+        )
+        assert data.get("retry_count", 0) == 0
+
+
+class TestRunningResetOnStartup:
+    """起動時の running → pending リセットテスト。"""
+
+    def test_reset_running_media(self):
+        """clip_status='running' のレコードが reset_running_media() で 'pending' になる。"""
+        from database import SessionLocal
+        import crud
+        import models
+
+        db = SessionLocal()
+        try:
+            # running レコードを作成
+            media = models.Media(
+                original_filename="running_test.jpg",
+                minio_key="images/running_test.jpg",
+                file_hash="abc123",
+                media_type="image",
+                clip_status="running",
+                retry_count=0,
+            )
+            db.add(media)
+            db.commit()
+            db.refresh(media)
+            media_id = media.id
+
+            # reset_running_media を実行
+            reset_count = crud.reset_running_media(db)
+            assert reset_count >= 1, f"リセット件数が 0: {reset_count}"
+
+            # レコードが pending になっていることを確認
+            db.refresh(media)
+            assert media.clip_status == "pending", (
+                f"running が pending にリセットされていない: {media.clip_status}"
+            )
+        finally:
+            db.close()

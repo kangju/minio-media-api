@@ -42,8 +42,8 @@ class MediaResponse(BaseModel):
     original_filename: str
     """元のファイル名。"""
 
-    minio_key: str
-    """MinIO 上のオブジェクトキー。"""
+    minio_key: Optional[str] = None
+    """MinIO 上のオブジェクトキー。アップロード失敗時は None。"""
 
     media_type: str
     """メディアタイプ（image または video）。"""
@@ -56,6 +56,15 @@ class MediaResponse(BaseModel):
 
     tags: List[TagInfo] = []
     """紐づくタグのリスト。"""
+
+    clip_status: str = "pending"
+    """CLIP解析ステータス（pending / running / done / error）。"""
+
+    retry_count: int = 0
+    """CLIP解析のリトライ回数。"""
+
+    error_detail: Optional[str] = None
+    """エラー詳細メッセージ。アップロードまたは CLIP 解析失敗時に設定される。"""
 
     model_config = {"from_attributes": True}
 
@@ -150,6 +159,13 @@ class ClipTagScore(BaseModel):
 
     score: float
     """CLIP スコア。"""
+
+
+class AnalyzeRequest(BaseModel):
+    """CLIP 解析リクエストスキーマ。"""
+
+    candidates: Optional[List[str]] = Field(default=None)
+    """追加の候補タグ名リスト。DB 既存タグとマージして CLIP 候補とする。"""
 
 
 class ClipAnalyzeResponse(BaseModel):

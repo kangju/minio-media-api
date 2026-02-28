@@ -31,6 +31,35 @@ ALL_ALLOWED_TYPES: dict[str, list[str]] = {
 }
 
 
+def _validate_type_and_ext(
+    content_type: str, filename: str, allowed_types: dict[str, list[str]], type_error_msg: str
+) -> None:
+    """MIME タイプと拡張子の整合性を検証する共通ヘルパー。
+
+    Args:
+        content_type: ファイルの MIME タイプ。
+        filename: アップロードされたファイル名。
+        allowed_types: 許可する MIME タイプ → 拡張子リストのマッピング。
+        type_error_msg: MIME タイプが不正な場合のエラーメッセージ。
+
+    Raises:
+        HTTPException: MIME タイプが許可されていない場合、
+            または拡張子が MIME タイプと一致しない場合（422）。
+    """
+    if content_type not in allowed_types:
+        raise HTTPException(status_code=422, detail=type_error_msg)
+    ext = os.path.splitext(filename)[1].lower()
+    allowed_exts = allowed_types[content_type]
+    if ext not in allowed_exts:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"ファイル拡張子 '{ext}' は MIME タイプ '{content_type}' と一致しません。"
+                f" 許可される拡張子: {allowed_exts}"
+            ),
+        )
+
+
 def validate_file_type(content_type: str, filename: str) -> None:
     """ファイルの MIME タイプと拡張子を検証する。
 
@@ -45,21 +74,10 @@ def validate_file_type(content_type: str, filename: str) -> None:
         HTTPException: MIME タイプが許可されていない場合、
             または拡張子が MIME タイプと一致しない場合（422）。
     """
-    if content_type not in ALL_ALLOWED_TYPES:
-        raise HTTPException(
-            status_code=422,
-            detail=f"許可されていないファイルタイプです: {content_type}",
-        )
-    ext = os.path.splitext(filename)[1].lower()
-    allowed_exts = ALL_ALLOWED_TYPES[content_type]
-    if ext not in allowed_exts:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"ファイル拡張子 '{ext}' は MIME タイプ '{content_type}' と一致しません。"
-                f" 許可される拡張子: {allowed_exts}"
-            ),
-        )
+    _validate_type_and_ext(
+        content_type, filename, ALL_ALLOWED_TYPES,
+        f"許可されていないファイルタイプです: {content_type}",
+    )
 
 
 def validate_image_only(content_type: str, filename: str) -> None:
@@ -75,21 +93,10 @@ def validate_image_only(content_type: str, filename: str) -> None:
         HTTPException: MIME タイプが画像でない場合、
             または拡張子が MIME タイプと一致しない場合（422）。
     """
-    if content_type not in ALLOWED_IMAGE_TYPES:
-        raise HTTPException(
-            status_code=422,
-            detail=f"画像ファイルのみ許可されています。受け取った MIME タイプ: {content_type}",
-        )
-    ext = os.path.splitext(filename)[1].lower()
-    allowed_exts = ALLOWED_IMAGE_TYPES[content_type]
-    if ext not in allowed_exts:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"ファイル拡張子 '{ext}' は MIME タイプ '{content_type}' と一致しません。"
-                f" 許可される拡張子: {allowed_exts}"
-            ),
-        )
+    _validate_type_and_ext(
+        content_type, filename, ALLOWED_IMAGE_TYPES,
+        f"画像ファイルのみ許可されています。受け取った MIME タイプ: {content_type}",
+    )
 
 
 def validate_file_size(size_bytes: int, max_mb: int) -> None:

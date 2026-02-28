@@ -3,9 +3,17 @@
 環境変数から設定を読み込む。
 """
 
+import json
+import pathlib
 from typing import List
 
 from pydantic_settings import BaseSettings
+
+
+def load_default_vocabulary() -> List[str]:
+    """デフォルトタグ語彙をJSONファイルから読み込む。"""
+    path = pathlib.Path(__file__).parent / "data" / "default_tags.json"
+    return json.loads(path.read_text(encoding="utf-8"))["vocabulary"]
 
 
 class Settings(BaseSettings):

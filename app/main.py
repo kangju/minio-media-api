@@ -3,6 +3,10 @@
 アプリケーションの初期化、ミドルウェア設定、ルーター登録を行う。
 """
 
+import logging
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -10,29 +14,32 @@ from config import settings
 from database import Base, engine
 from routers import clip, media, tags
 
-app = FastAPI(
-    title="MinIO Image API",
-    description="画像・動画を MinIO にアップロードし CLIP による自動タグ付けを行う API。",
-    version="1.0.0",
-)
-"""FastAPI アプリケーションインスタンス。"""
 
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """アプリケーションのライフサイクル管理。
 
-@app.on_event("startup")
-def on_startup() -> None:
-    """アプリケーション起動時の初期化処理。
-
-    データベーステーブルの作成と MinIO バケットの確認を行う。
+    起動時にDBテーブルの作成とMinIOバケットの初期化を行う。
+    on_event("startup") の代替として lifespan を使用する。
     """
+    # 起動処理
     Base.metadata.create_all(bind=engine)
-
     try:
         from services.minio_service import get_minio_service
         get_minio_service()
     except Exception as e:
-        import logging
-        logging.warning(f"MinIO 初期化をスキップしました: {e}")
+        logging.warning("MinIO 初期化をスキップしました: %s", e)
 
+    yield  # アプリケーション稼働中
+
+
+app = FastAPI(
+    title="MinIO Image API",
+    description="画像・動画を MinIO にアップロードし CLIP による自動タグ付けを行う API。",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+"""FastAPI アプリケーションインスタンス。"""
 
 app.add_middleware(
     CORSMiddleware,

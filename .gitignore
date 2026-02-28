@@ -9,6 +9,20 @@ __pycache__/
 .venv/
 venv/
 
+# Node.js
+node_modules/
+.next/
+*.log
+npm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+
+# Test artifacts
+test-results/
+playwright-report/
+coverage/
+
 # Docker
 .dockerignore
 

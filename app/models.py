@@ -49,8 +49,8 @@ class Media(Base):
     original_filename: Mapped[str] = mapped_column(String, nullable=False)
     """元のファイル名。"""
 
-    minio_key: Mapped[str] = mapped_column(String, nullable=False)
-    """MinIO 上のオブジェクトキー。"""
+    minio_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    """MinIO 上のオブジェクトキー。アップロード失敗時は None。"""
 
     file_hash: Mapped[str] = mapped_column(String, nullable=False)
     """ファイルの SHA256 ハッシュ値。"""
@@ -67,6 +67,15 @@ class Media(Base):
 
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     """論理削除日時。None の場合は未削除。"""
+
+    clip_status: Mapped[str] = mapped_column(String, nullable=False, default="pending", server_default="pending")
+    """CLIP解析ステータス（pending / running / done / error）。"""
+
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    """CLIP解析のリトライ回数。MAX_RETRY を超えると clip_status='error' になる。"""
+
+    error_detail: Mapped[str | None] = mapped_column(String, nullable=True)
+    """エラー詳細メッセージ。アップロードまたは CLIP 解析失敗時に保存される。"""
 
     media_tags: Mapped[list["MediaTag"]] = relationship(
         "MediaTag", back_populates="media", cascade="all, delete-orphan"

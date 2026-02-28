@@ -29,7 +29,8 @@ from database import Base
 def db_engine():
     """セッションスコープの DB エンジン。
 
-    テーブルを作成し、セッション終了後に削除する。
+    テーブルを作成する（既存テーブルがある場合はスキップ）。
+    テスト終了後はテーブルを削除しない（データはTRUNCATEのみ）。
 
     Yields:
         Engine: SQLAlchemy エンジンインスタンス。
@@ -37,7 +38,6 @@ def db_engine():
     engine = create_engine(settings.database_url)
     Base.metadata.create_all(bind=engine)
     yield engine
-    Base.metadata.drop_all(bind=engine)
     engine.dispose()
 
 
@@ -64,6 +64,24 @@ def minio_raw_client():
 # ---------------------------------------------------------------------------
 # テストごとのクリーンアップ（autouse）
 # ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="session", autouse=True)
+def initial_clean(db_engine, minio_raw_client):
+    """セッション開始時に全テーブルとMinIOをクリーンアップする。
+
+    前回のテスト実行で残ったデータを削除する。テーブル自体は削除しない。
+    """
+    with db_engine.connect() as conn:
+        conn.execute(
+            text("TRUNCATE TABLE media_tags, media, tags RESTART IDENTITY CASCADE")
+        )
+        conn.commit()
+    objects = list(
+        minio_raw_client.list_objects(settings.minio_bucket, recursive=True)
+    )
+    for obj in objects:
+        minio_raw_client.remove_object(settings.minio_bucket, obj.object_name)
+
 
 @pytest.fixture(autouse=True)
 def clean_db(db_engine):

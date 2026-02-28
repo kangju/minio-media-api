@@ -6,13 +6,13 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import crud
 from database import get_db
-from models import MediaTag, Tag
+from models import Media, MediaTag, Tag
 from schemas import AddTagRequest, TagCreate, TagInfo, TagResponse, TagUpdate
 
 router = APIRouter(tags=["tags"])
@@ -93,7 +93,6 @@ def update_tag(
         db.rollback()
         raise HTTPException(status_code=409, detail="同名のタグが既に存在します。")
 
-    from sqlalchemy import func
     media_count = db.execute(
         select(func.count(MediaTag.media_id)).where(MediaTag.tag_id == tag.id)
     ).scalar_one()
@@ -138,7 +137,6 @@ def add_tag_to_media(
     Raises:
         HTTPException: メディアが見つからない場合（404）。
     """
-    from models import Media
     media = db.execute(select(Media).where(Media.id == media_id)).scalar_one_or_none()
     if media is None:
         raise HTTPException(status_code=404, detail="メディアが見つかりません。")
