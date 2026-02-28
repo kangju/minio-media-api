@@ -1,3 +1,6 @@
+export type SortBy = 'created_at' | 'original_filename';
+export type SortOrder = 'asc' | 'desc';
+
 export interface TagInfo {
   id: number;
   name: string;

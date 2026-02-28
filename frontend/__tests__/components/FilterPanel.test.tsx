@@ -7,8 +7,8 @@ const defaultProps = {
   includeDeleted: false,
   createdFrom: '',
   createdTo: '',
-  sortBy: 'created_at',
-  sortOrder: 'desc',
+  sortBy: 'created_at' as const,
+  sortOrder: 'desc' as const,
   onMediaTypeChange: jest.fn(),
   onIncludeDeletedChange: jest.fn(),
   onCreatedFromChange: jest.fn(),
@@ -65,5 +65,15 @@ describe('FilterPanel', () => {
     render(<FilterPanel {...defaultProps} />);
     fireEvent.click(screen.getByTestId('filter-reset-btn'));
     expect(defaultProps.onReset).toHaveBeenCalledTimes(1);
+  });
+
+  test('sort-by select has aria-label for accessibility', () => {
+    render(<FilterPanel {...defaultProps} />);
+    expect(screen.getByTestId('sort-by-select')).toHaveAttribute('aria-label', 'ソート対象');
+  });
+
+  test('sort-order select has aria-label for accessibility', () => {
+    render(<FilterPanel {...defaultProps} />);
+    expect(screen.getByTestId('sort-order-select')).toHaveAttribute('aria-label', 'ソート順');
   });
 });

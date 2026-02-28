@@ -240,8 +240,8 @@ export default function Home() {
         onIncludeDeletedChange={setIncludeDeleted}
         onCreatedFromChange={setCreatedFrom}
         onCreatedToChange={setCreatedTo}
-        onSortByChange={(v) => setSortBy(v as 'created_at' | 'original_filename')}
-        onSortOrderChange={(v) => setSortOrder(v as 'asc' | 'desc')}
+        onSortByChange={setSortBy}
+        onSortOrderChange={setSortOrder}
         onReset={() => {
           setMediaType('');
           setIncludeDeleted(false);

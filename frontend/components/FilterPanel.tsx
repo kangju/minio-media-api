@@ -1,18 +1,20 @@
 'use client';
 
+import { SortBy, SortOrder } from '@/lib/types';
+
 interface FilterPanelProps {
   mediaType: string;
   includeDeleted: boolean;
   createdFrom: string;
   createdTo: string;
-  sortBy: string;
-  sortOrder: string;
+  sortBy: SortBy;
+  sortOrder: SortOrder;
   onMediaTypeChange: (v: string) => void;
   onIncludeDeletedChange: (v: boolean) => void;
   onCreatedFromChange: (v: string) => void;
   onCreatedToChange: (v: string) => void;
-  onSortByChange: (v: string) => void;
-  onSortOrderChange: (v: string) => void;
+  onSortByChange: (v: SortBy) => void;
+  onSortOrderChange: (v: SortOrder) => void;
   onReset: () => void;
 }
 
@@ -110,8 +112,12 @@ export default function FilterPanel({
 
       <select
         data-testid="sort-by-select"
+        aria-label="ソート対象"
         value={sortBy}
-        onChange={(e) => onSortByChange(e.target.value)}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === 'created_at' || v === 'original_filename') onSortByChange(v);
+        }}
         style={selectStyle}
       >
         <option value="created_at">作成日時</option>
@@ -120,8 +126,12 @@ export default function FilterPanel({
 
       <select
         data-testid="sort-order-select"
+        aria-label="ソート順"
         value={sortOrder}
-        onChange={(e) => onSortOrderChange(e.target.value)}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === 'asc' || v === 'desc') onSortOrderChange(v);
+        }}
         style={selectStyle}
       >
         <option value="desc">降順</option>

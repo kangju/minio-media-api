@@ -447,6 +447,60 @@ class TestSortMedia:
         assert r.status_code == 422
 
 
+class TestSortCrudValidation:
+    """crud.get_media_list のソートバリデーションテスト。
+
+    router の Literal バリデーション到達前に crud が直接呼ばれた場合でも
+    不正値に対して ValueError を発生させることを確認する。
+    """
+
+    def test_invalid_sort_by_raises_value_error(self, db_engine):
+        """不正な sort_by は ValueError を発生させる。"""
+        import crud
+        from database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            with pytest.raises(ValueError, match="sort_by"):
+                crud.get_media_list(
+                    db,
+                    tag=[],
+                    media_type=None,
+                    include_deleted=False,
+                    created_from=None,
+                    created_to=None,
+                    offset=0,
+                    limit=10,
+                    sort_by="unknown_field",
+                    sort_order="desc",
+                )
+        finally:
+            db.close()
+
+    def test_invalid_sort_order_raises_value_error(self, db_engine):
+        """不正な sort_order は ValueError を発生させる。"""
+        import crud
+        from database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            with pytest.raises(ValueError, match="sort_order"):
+                crud.get_media_list(
+                    db,
+                    tag=[],
+                    media_type=None,
+                    include_deleted=False,
+                    created_from=None,
+                    created_to=None,
+                    offset=0,
+                    limit=10,
+                    sort_by="created_at",
+                    sort_order="random",
+                )
+        finally:
+            db.close()
+
+
 class TestSortWithManyMedia:
     """150枚の大量データでのソート・ページネーション・フィルタテスト。
 
@@ -513,6 +567,19 @@ class TestSortWithManyMedia:
         data = r.json()
         assert data["total"] == 1
         assert data["items"][0]["id"] == tagged_id
+
+    def test_pagination_covers_all_items_without_duplicates(self, client):
+        """3ページ合計で150件が重複なく揃う（タイブレーカー動作確認）。"""
+        page1 = client.get("/media?sort_by=created_at&sort_order=desc&limit=50&offset=0").json()
+        page2 = client.get("/media?sort_by=created_at&sort_order=desc&limit=50&offset=50").json()
+        page3 = client.get("/media?sort_by=created_at&sort_order=desc&limit=50&offset=100").json()
+        all_ids = (
+            [i["id"] for i in page1["items"]]
+            + [i["id"] for i in page2["items"]]
+            + [i["id"] for i in page3["items"]]
+        )
+        assert len(all_ids) == 150
+        assert len(set(all_ids)) == 150  # 重複なし（タイブレーカー有効）
 
 
 class TestGetMediaById:
@@ -594,6 +661,28 @@ class TestGetMediaFile:
         client.delete(f"/media/{self.media_id}")
         r = client.get(f"/media/{self.media_id}/file")
         assert r.status_code == 404
+
+
+class TestGetMediaFileMissingKey:
+    """GET /media/{id}/file で minio_key=None のレコードが 409 を返すテスト。"""
+
+    def test_missing_minio_key_returns_409(self, client, db_engine):
+        """minio_key が None のメディアに対してファイル取得は 409 になる。"""
+        from sqlalchemy import text
+
+        # minio_key=None のレコードを直接 DB に挿入（アップロード失敗時と同じ状態）
+        with db_engine.connect() as conn:
+            result = conn.execute(
+                text(
+                    "INSERT INTO media (original_filename, minio_key, file_hash, media_type, clip_status)"
+                    " VALUES ('error.jpg', NULL, 'errorhash001', 'image', 'error') RETURNING id"
+                )
+            )
+            media_id = result.scalar_one()
+            conn.commit()
+
+        r = client.get(f"/media/{media_id}/file")
+        assert r.status_code == 409
 
 
 class TestDeleteMedia:

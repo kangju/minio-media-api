@@ -261,6 +261,8 @@ def get_media_file(
     media = crud.get_media_by_id(db, media_id)
     if media is None:
         raise HTTPException(status_code=404, detail="メディアが見つかりません。")
+    if media.minio_key is None:
+        raise HTTPException(status_code=409, detail="このメディアはファイルが存在しません。")
     data, content_type = minio.get_file(media.minio_key)
     headers = {
         "Cache-Control": "public, max-age=31536000, immutable",

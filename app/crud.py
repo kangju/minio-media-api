@@ -97,9 +97,19 @@ def get_media_list(
         "created_at": Media.created_at,
         "original_filename": Media.original_filename,
     }
+    if sort_by not in _sort_columns:
+        raise ValueError(f"Invalid sort_by value: {sort_by!r}")
     sort_col = _sort_columns[sort_by]
-    order_expr = sort_col.asc() if sort_order == "asc" else sort_col.desc()
-    stmt = stmt.order_by(order_expr).offset(offset).limit(limit)
+
+    if sort_order == "asc":
+        order_expr = sort_col.asc()
+    elif sort_order == "desc":
+        order_expr = sort_col.desc()
+    else:
+        raise ValueError(f"Invalid sort_order value: {sort_order!r}")
+
+    id_order_expr = Media.id.asc() if sort_order == "asc" else Media.id.desc()
+    stmt = stmt.order_by(order_expr, id_order_expr).offset(offset).limit(limit)
     items = list(db.execute(stmt).scalars().all())
 
     return items, total
