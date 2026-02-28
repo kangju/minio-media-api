@@ -25,6 +25,8 @@ export default function Home() {
   const [includeDeleted, setIncludeDeleted] = useState(false);
   const [createdFrom, setCreatedFrom] = useState('');
   const [createdTo, setCreatedTo] = useState('');
+  const [sortBy, setSortBy] = useState<'created_at' | 'original_filename'>('created_at');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [lightboxMedia, setLightboxMedia] = useState<MediaResponse | null>(null);
   const [showUpload, setShowUpload] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -49,6 +51,8 @@ export default function Home() {
         created_to: createdTo || undefined,
         offset: currentOffset,
         limit: LIMIT,
+        sort_by: sortBy,
+        sort_order: sortOrder,
       });
       const newItems = data.items;
       if (reset) {
@@ -65,7 +69,7 @@ export default function Home() {
     }
     loadingRef.current = false;
     setLoading(false);
-  }, [activeTags, mediaType, includeDeleted, createdFrom, createdTo]);
+  }, [activeTags, mediaType, includeDeleted, createdFrom, createdTo, sortBy, sortOrder]);
 
   const fetchTags = useCallback(async () => {
     try {
@@ -81,7 +85,7 @@ export default function Home() {
     offsetRef.current = 0;
     setHasMore(true);
     fetchMedia(true);
-  }, [activeTags, mediaType, includeDeleted, createdFrom, createdTo, fetchMedia]);
+  }, [activeTags, mediaType, includeDeleted, createdFrom, createdTo, sortBy, sortOrder, fetchMedia]);
 
   useEffect(() => {
     fetchTags();
@@ -226,15 +230,21 @@ export default function Home() {
         includeDeleted={includeDeleted}
         createdFrom={createdFrom}
         createdTo={createdTo}
+        sortBy={sortBy}
+        sortOrder={sortOrder}
         onMediaTypeChange={setMediaType}
         onIncludeDeletedChange={setIncludeDeleted}
         onCreatedFromChange={setCreatedFrom}
         onCreatedToChange={setCreatedTo}
+        onSortByChange={(v) => setSortBy(v as 'created_at' | 'original_filename')}
+        onSortOrderChange={(v) => setSortOrder(v as 'asc' | 'desc')}
         onReset={() => {
           setMediaType('');
           setIncludeDeleted(false);
           setCreatedFrom('');
           setCreatedTo('');
+          setSortBy('created_at');
+          setSortOrder('desc');
         }}
       />
       </div>

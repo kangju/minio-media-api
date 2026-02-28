@@ -381,6 +381,72 @@ class TestGetMediaList:
         assert r.json()["items"] == []
 
 
+class TestSortMedia:
+    """GET /media のソートパラメータテスト。"""
+
+    @pytest.fixture(autouse=True)
+    def setup_media(self, client):
+        """ソートテスト用にファイル名・作成順が異なるメディアを作成する。"""
+        self.media_b = client.post(
+            "/media",
+            files=[make_upload_file(MINIMAL_JPEG, "beta.jpg", "image/jpeg")],
+        ).json()
+        self.media_a = client.post(
+            "/media",
+            files=[make_upload_file(MINIMAL_JPEG_2, "alpha.jpg", "image/jpeg")],
+        ).json()
+
+    def test_default_sort_created_at_desc(self, client):
+        """デフォルト（パラメータなし）で created_at 降順になる。"""
+        r = client.get("/media")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) >= 2
+        # 最後に作成したものが先頭（降順）
+        ids = [i["id"] for i in items]
+        assert ids.index(self.media_a["id"]) < ids.index(self.media_b["id"])
+
+    def test_sort_created_at_asc(self, client):
+        """sort_by=created_at&sort_order=asc で昇順になる。"""
+        r = client.get("/media?sort_by=created_at&sort_order=asc")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) >= 2
+        # 最初に作成したものが先頭（昇順）
+        ids = [i["id"] for i in items]
+        assert ids.index(self.media_b["id"]) < ids.index(self.media_a["id"])
+
+    def test_sort_filename_asc(self, client):
+        """sort_by=original_filename&sort_order=asc でファイル名昇順になる。"""
+        r = client.get("/media?sort_by=original_filename&sort_order=asc")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) >= 2
+        filenames = [i["original_filename"] for i in items]
+        # alpha.jpg が beta.jpg より前
+        assert filenames.index("alpha.jpg") < filenames.index("beta.jpg")
+
+    def test_sort_filename_desc(self, client):
+        """sort_by=original_filename&sort_order=desc でファイル名降順になる。"""
+        r = client.get("/media?sort_by=original_filename&sort_order=desc")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) >= 2
+        filenames = [i["original_filename"] for i in items]
+        # beta.jpg が alpha.jpg より前
+        assert filenames.index("beta.jpg") < filenames.index("alpha.jpg")
+
+    def test_invalid_sort_by_422(self, client):
+        """不正な sort_by は 422 を返す。"""
+        r = client.get("/media?sort_by=unknown_field")
+        assert r.status_code == 422
+
+    def test_invalid_sort_order_422(self, client):
+        """不正な sort_order は 422 を返す。"""
+        r = client.get("/media?sort_order=random")
+        assert r.status_code == 422
+
+
 class TestGetMediaById:
     """GET /media/{id} エンドポイントのテスト。"""
 

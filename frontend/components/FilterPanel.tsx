@@ -5,10 +5,14 @@ interface FilterPanelProps {
   includeDeleted: boolean;
   createdFrom: string;
   createdTo: string;
+  sortBy: string;
+  sortOrder: string;
   onMediaTypeChange: (v: string) => void;
   onIncludeDeletedChange: (v: boolean) => void;
   onCreatedFromChange: (v: string) => void;
   onCreatedToChange: (v: string) => void;
+  onSortByChange: (v: string) => void;
+  onSortOrderChange: (v: string) => void;
   onReset: () => void;
 }
 
@@ -17,12 +21,26 @@ export default function FilterPanel({
   includeDeleted,
   createdFrom,
   createdTo,
+  sortBy,
+  sortOrder,
   onMediaTypeChange,
   onIncludeDeletedChange,
   onCreatedFromChange,
   onCreatedToChange,
+  onSortByChange,
+  onSortOrderChange,
   onReset,
 }: FilterPanelProps) {
+  const selectStyle = {
+    background: 'rgba(255,255,255,0.05)',
+    border: '1px solid var(--border)',
+    borderRadius: 4,
+    color: 'var(--text)',
+    padding: '4px 8px',
+    fontSize: '0.78rem',
+    cursor: 'pointer',
+  };
+
   return (
     <div
       data-testid="filter-panel"
@@ -45,15 +63,7 @@ export default function FilterPanel({
         data-testid="media-type-select"
         value={mediaType}
         onChange={(e) => onMediaTypeChange(e.target.value)}
-        style={{
-          background: 'rgba(255,255,255,0.05)',
-          border: '1px solid var(--border)',
-          borderRadius: 4,
-          color: 'var(--text)',
-          padding: '4px 8px',
-          fontSize: '0.78rem',
-          cursor: 'pointer',
-        }}
+        style={selectStyle}
       >
         <option value="">すべて</option>
         <option value="image">画像</option>
@@ -79,14 +89,7 @@ export default function FilterPanel({
           type="date"
           value={createdFrom}
           onChange={(e) => onCreatedFromChange(e.target.value)}
-          style={{
-            background: 'rgba(255,255,255,0.05)',
-            border: '1px solid var(--border)',
-            borderRadius: 4,
-            color: 'var(--text)',
-            padding: '4px 8px',
-            fontSize: '0.78rem',
-          }}
+          style={selectStyle}
         />
       </label>
 
@@ -97,16 +100,33 @@ export default function FilterPanel({
           type="date"
           value={createdTo}
           onChange={(e) => onCreatedToChange(e.target.value)}
-          style={{
-            background: 'rgba(255,255,255,0.05)',
-            border: '1px solid var(--border)',
-            borderRadius: 4,
-            color: 'var(--text)',
-            padding: '4px 8px',
-            fontSize: '0.78rem',
-          }}
+          style={selectStyle}
         />
       </label>
+
+      <span style={{ letterSpacing: 1, textTransform: 'uppercase', color: 'var(--muted)' }}>
+        Sort:
+      </span>
+
+      <select
+        data-testid="sort-by-select"
+        value={sortBy}
+        onChange={(e) => onSortByChange(e.target.value)}
+        style={selectStyle}
+      >
+        <option value="created_at">作成日時</option>
+        <option value="original_filename">ファイル名</option>
+      </select>
+
+      <select
+        data-testid="sort-order-select"
+        value={sortOrder}
+        onChange={(e) => onSortOrderChange(e.target.value)}
+        style={selectStyle}
+      >
+        <option value="desc">降順</option>
+        <option value="asc">昇順</option>
+      </select>
 
       <button
         data-testid="filter-reset-btn"

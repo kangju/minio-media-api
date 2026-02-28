@@ -9,7 +9,7 @@ import io
 import logging
 import os
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
@@ -191,6 +191,8 @@ def list_media(
     created_to: Optional[datetime] = Query(default=None),
     offset: int = Query(default=0, ge=0),
     limit: Optional[int] = Query(default=None),
+    sort_by: Literal["created_at", "original_filename"] = Query(default="created_at"),
+    sort_order: Literal["asc", "desc"] = Query(default="desc"),
     db: Session = Depends(get_db),
 ) -> MediaListResponse:
     """メディア一覧を取得する。
@@ -206,6 +208,8 @@ def list_media(
         created_to: 作成日時の上限。
         offset: 取得開始位置。
         limit: 取得件数。
+        sort_by: ソートフィールド（created_at または original_filename）。
+        sort_order: ソート順（asc または desc）。
         db: データベースセッション。
 
     Returns:
@@ -224,6 +228,8 @@ def list_media(
         created_to=created_to,
         offset=offset,
         limit=limit,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
     return MediaListResponse(
         items=[_build_media_response(m) for m in items],

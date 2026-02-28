@@ -44,6 +44,8 @@ def get_media_list(
     created_to: Optional[datetime],
     offset: int,
     limit: int,
+    sort_by: str = "created_at",
+    sort_order: str = "desc",
 ) -> tuple[list[Media], int]:
     """メディア一覧を取得する。
 
@@ -56,6 +58,8 @@ def get_media_list(
         created_to: 作成日時の上限。
         offset: 取得開始位置。
         limit: 取得件数。
+        sort_by: ソートフィールド（created_at または original_filename）。
+        sort_order: ソート順（asc または desc）。
 
     Returns:
         tuple[list[Media], int]: メディアリストと総件数のタプル。
@@ -89,7 +93,13 @@ def get_media_list(
     count_stmt = select(func.count()).select_from(stmt.subquery())
     total = db.execute(count_stmt).scalar_one()
 
-    stmt = stmt.order_by(Media.created_at.desc()).offset(offset).limit(limit)
+    _sort_columns = {
+        "created_at": Media.created_at,
+        "original_filename": Media.original_filename,
+    }
+    sort_col = _sort_columns[sort_by]
+    order_expr = sort_col.asc() if sort_order == "asc" else sort_col.desc()
+    stmt = stmt.order_by(order_expr).offset(offset).limit(limit)
     items = list(db.execute(stmt).scalars().all())
 
     return items, total

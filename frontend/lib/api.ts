@@ -10,6 +10,8 @@ export async function getMediaList(params?: {
   created_to?: string;
   offset?: number;
   limit?: number;
+  sort_by?: 'created_at' | 'original_filename';
+  sort_order?: 'asc' | 'desc';
 }): Promise<MediaListResponse> {
   const q = new URLSearchParams();
   params?.tags?.forEach((t) => q.append('tag', t));
@@ -19,6 +21,8 @@ export async function getMediaList(params?: {
   if (params?.created_to) q.set('created_to', params.created_to);
   if (params?.offset != null) q.set('offset', String(params.offset));
   if (params?.limit != null) q.set('limit', String(params.limit));
+  if (params?.sort_by) q.set('sort_by', params.sort_by);
+  if (params?.sort_order) q.set('sort_order', params.sort_order);
   const res = await fetch(`${BASE}/media?${q.toString()}`);
   if (!res.ok) throw new Error('Failed to fetch media list');
   return res.json();

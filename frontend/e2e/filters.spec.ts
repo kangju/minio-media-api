@@ -225,3 +225,40 @@ test.describe('ナビゲーション（ギャラリーからタグページ）',
     await expect(page.locator('[data-testid="tags-page"]')).toBeVisible();
   });
 });
+
+test.describe('ソート機能', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+  });
+
+  test('ソートフィールドセレクトが表示される', async ({ page }) => {
+    await expect(page.locator('[data-testid="sort-by-select"]')).toBeVisible();
+  });
+
+  test('ソート順セレクトが表示される', async ({ page }) => {
+    await expect(page.locator('[data-testid="sort-order-select"]')).toBeVisible();
+  });
+
+  test('ソートフィールドを変更できる', async ({ page }) => {
+    const sortBySelect = page.locator('[data-testid="sort-by-select"]');
+    await sortBySelect.selectOption('original_filename');
+    await expect(sortBySelect).toHaveValue('original_filename');
+  });
+
+  test('ソート順を変更できる', async ({ page }) => {
+    const sortOrderSelect = page.locator('[data-testid="sort-order-select"]');
+    await sortOrderSelect.selectOption('asc');
+    await expect(sortOrderSelect).toHaveValue('asc');
+  });
+
+  test('リセットボタンでソートがデフォルトに戻る', async ({ page }) => {
+    // ソートを変更
+    await page.locator('[data-testid="sort-by-select"]').selectOption('original_filename');
+    await page.locator('[data-testid="sort-order-select"]').selectOption('asc');
+    // リセット
+    await page.locator('[data-testid="filter-reset-btn"]').click();
+    await expect(page.locator('[data-testid="sort-by-select"]')).toHaveValue('created_at');
+    await expect(page.locator('[data-testid="sort-order-select"]')).toHaveValue('desc');
+  });
+});
