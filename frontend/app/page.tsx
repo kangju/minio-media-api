@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { MediaResponse, TagResponse } from '@/lib/types';
-import { getMediaList, getTags, deleteMedia } from '@/lib/api';
+import { getMediaList, getTags, getMedia, deleteMedia } from '@/lib/api';
 import Header from '@/components/Header';
 import Gallery from '@/components/Gallery';
 import Lightbox from '@/components/Lightbox';
@@ -87,17 +87,49 @@ export default function Home() {
     fetchTags();
   }, [fetchTags]);
 
-  // Polling: pending画像がある間は5秒ごとに再取得
+  // pendingIdsRef: レンダー中に同期更新（エフェクト不要、スクロールでタイマーがリセットされない）
+  const pendingIdsRef = useRef<number[]>([]);
+  pendingIdsRef.current = items
+    .filter((i) => i.clip_status === 'pending' || i.clip_status === 'running')
+    .map((i) => i.id);
+  const hasPending = pendingIdsRef.current.length > 0;
+
+  // Polling: pending/running アイテムのみ個別取得して in-place 更新
   useEffect(() => {
-    const hasPending = items.some((i) => i.clip_status === 'pending' || i.clip_status === 'running');
     if (!hasPending) return;
-    const timer = setInterval(() => {
-      offsetRef.current = 0;
-      fetchMedia(true);
-      fetchTags();
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [items, fetchMedia, fetchTags]);
+    let cancelled = false;
+
+    async function poll() {
+      if (cancelled) return;
+      const ids = pendingIdsRef.current;
+      if (ids.length === 0) return;
+      try {
+        const results = await Promise.allSettled(ids.map((id) => getMedia(id)));
+        if (cancelled) return;
+        const updates = results
+          .filter((r): r is PromiseFulfilledResult<MediaResponse> => r.status === 'fulfilled')
+          .map((r) => r.value);
+        if (updates.length > 0) {
+          setItems((prev) =>
+            prev.map((item) => updates.find((u) => u.id === item.id) ?? item)
+          );
+          const anyCompleted = updates.some(
+            (u) => u.clip_status !== 'pending' && u.clip_status !== 'running'
+          );
+          if (anyCompleted) fetchTags();
+        }
+      } catch (e) {
+        console.error(e);
+      }
+      if (!cancelled) setTimeout(poll, 5000);
+    }
+
+    const timer = setTimeout(poll, 5000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [hasPending, fetchTags]);
 
   // Infinite scroll
   useEffect(() => {
