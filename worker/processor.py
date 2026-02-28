@@ -4,6 +4,7 @@ API コード (app/) を一切インポートしない独立モジュール。
 DB アクセスは SQLAlchemy text() による生 SQL で行う。
 """
 
+import functools
 import io
 import json
 import logging
@@ -130,8 +131,9 @@ def _get_media_info(media_id: int) -> Optional[dict]:
     return {"minio_key": row[0], "retry_count": row[1]}
 
 
+@functools.lru_cache(maxsize=None)
 def _load_default_vocabulary() -> list[str]:
-    """デフォルトタグ語彙を JSON ファイルから読み込む。"""
+    """デフォルトタグ語彙を JSON ファイルから読み込む。プロセス起動時に1回だけ実行される。"""
     vocab_path = pathlib.Path(__file__).parent / "data" / "default_tags.json"
     try:
         return json.loads(vocab_path.read_text(encoding="utf-8"))["vocabulary"]
@@ -214,7 +216,13 @@ def _save_clip_tags(media_id: int, clip_results: list[dict]) -> None:
                 text("""
                     INSERT INTO media_tags (media_id, tag_id, source, score)
                     VALUES (:mid, :tid, 'clip', :score)
-                    ON CONFLICT (media_id, tag_id) DO NOTHING
+                    ON CONFLICT (media_id, tag_id) DO UPDATE
+                    SET
+                        source = CASE
+                            WHEN media_tags.source = 'user'::tagsourceenum THEN 'user'::tagsourceenum
+                            ELSE 'clip'::tagsourceenum
+                        END,
+                        score = EXCLUDED.score
                 """),
                 {"mid": media_id, "tid": tag_id, "score": score},
             )
