@@ -16,7 +16,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 import crud
-from config import load_default_vocabulary, settings
+from config import settings
 from database import get_db
 from schemas import AnalyzeRequest, MediaListResponse, MediaResponse, TagInfo
 from services.clip_service import ClipService, get_clip_service
@@ -35,7 +35,8 @@ router = APIRouter(prefix="/media", tags=["media"])
 def _build_clip_candidates(db_tags: list[dict], extra: list[str] | None = None) -> list[str]:
     """CLIP 解析用の候補タグリストを構築する。
 
-    DB 既存タグ + デフォルト語彙（JSON）+ 追加候補 をマージして返す。
+    DB 既存タグ（デフォルトタグ含む）+ 追加候補 をマージして返す。
+    デフォルトタグは DB に起動時シード済みのため JSON 読み込みは不要。
 
     Args:
         db_tags: DB から取得したタグ辞書リスト（{"name": str, ...}）。
@@ -48,7 +49,6 @@ def _build_clip_candidates(db_tags: list[dict], extra: list[str] | None = None) 
     candidates: list[str] = []
     for source in (
         [t["name"] for t in db_tags],
-        load_default_vocabulary(),
         extra or [],
     ):
         for name in source:

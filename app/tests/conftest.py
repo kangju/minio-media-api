@@ -5,7 +5,9 @@
 """
 
 import io
+import json
 import os
+import pathlib
 import sys
 
 # app ディレクトリをパスに追加
@@ -19,6 +21,25 @@ from sqlalchemy import create_engine, text
 import models  # noqa: F401 - モデルを Base に登録するために必要
 from config import settings
 from database import Base
+
+
+# ---------------------------------------------------------------------------
+# デフォルトタグ再シード（TRUNCATE 後の復元用）
+# ---------------------------------------------------------------------------
+
+def _reseed_default_tags(conn) -> None:
+    """デフォルトタグを DB に再挿入する。
+
+    TRUNCATE で削除されたデフォルトタグを ON CONFLICT DO NOTHING で復元する。
+    テスト間の隔離を維持しつつデフォルトタグを常に利用可能にする。
+    """
+    vocab_path = pathlib.Path(__file__).parent.parent / "data" / "default_tags.json"
+    vocab: list[str] = json.loads(vocab_path.read_text(encoding="utf-8"))["vocabulary"]
+    if not vocab:
+        return
+    placeholders = ", ".join(f"('{name.replace(chr(39), chr(39)*2)}')" for name in vocab)
+    conn.execute(text(f"INSERT INTO tags (name) VALUES {placeholders} ON CONFLICT (name) DO NOTHING"))
+    conn.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +97,7 @@ def initial_clean(db_engine, minio_raw_client):
             text("TRUNCATE TABLE media_tags, media, tags RESTART IDENTITY CASCADE")
         )
         conn.commit()
+        _reseed_default_tags(conn)
     objects = list(
         minio_raw_client.list_objects(settings.minio_bucket, recursive=True)
     )
@@ -98,6 +120,7 @@ def clean_db(db_engine):
             )
         )
         conn.commit()
+        _reseed_default_tags(conn)
 
 
 @pytest.fixture(autouse=True)

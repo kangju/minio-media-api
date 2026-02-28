@@ -225,3 +225,60 @@ class TestRemoveTagFromMedia:
         r = client.get(f"/media/{self.media_id}")
         tag_ids = [t["id"] for t in r.json()["tags"]]
         assert self.tag_id not in tag_ids
+
+
+class TestDefaultTags:
+    """デフォルトタグのシード動作テスト。
+
+    DB 初期化時に docker/initdb/02_seed_tags.sql で投入されたタグを検証する。
+    """
+
+    # デフォルトタグ語彙の件数（app/data/default_tags.json と一致）
+    VOCAB_COUNT = 209
+
+    def test_default_tags_exist_on_startup(self, client):
+        """起動後に既知のデフォルトタグが DB に存在する。"""
+        r = client.get("/tags")
+        assert r.status_code == 200
+        names = {t["name"] for t in r.json()}
+        for known in ("cat", "dog", "bird", "person", "car"):
+            assert known in names, f"デフォルトタグ '{known}' が見つからない"
+
+    def test_default_tags_count(self, client):
+        """シード後のタグ数が語彙件数以上である。"""
+        r = client.get("/tags")
+        assert r.status_code == 200
+        assert len(r.json()) >= self.VOCAB_COUNT, (
+            f"タグ数 {len(r.json())} が語彙数 {self.VOCAB_COUNT} 未満"
+        )
+
+    def test_seed_is_idempotent(self, client, db_engine):
+        """シード SQL を再実行してもタグが重複しない。"""
+        from sqlalchemy import text
+
+        seed_sql = """
+            INSERT INTO tags (name) VALUES ('cat'), ('dog'), ('bird')
+            ON CONFLICT (name) DO NOTHING;
+        """
+        with db_engine.connect() as conn:
+            conn.execute(text(seed_sql))
+            conn.commit()
+
+        r = client.get("/tags")
+        assert r.status_code == 200
+        cat_entries = [t for t in r.json() if t["name"] == "cat"]
+        assert len(cat_entries) == 1, "冪等でない: 'cat' が重複している"
+
+    def test_clip_candidates_uses_db_tags(self, client):
+        """CLIP 候補タグにデフォルトタグが含まれる（DB 経由）。"""
+        from routers.media import _build_clip_candidates
+
+        # GET /tags で DB タグを取得し、候補リストを構築する
+        r = client.get("/tags")
+        assert r.status_code == 200
+        db_tags = r.json()  # [{"id": ..., "name": ..., ...}]
+
+        candidates = _build_clip_candidates(db_tags)
+        assert "cat" in candidates
+        assert "dog" in candidates
+        assert len(candidates) >= self.VOCAB_COUNT

@@ -1,0 +1,80 @@
+version: "3.9"
+
+# 隔離テスト環境
+# 本番コンテナ（docker-compose.yml）とは別ポートで起動し、テスト後にボリュームを削除する。
+#
+# 使い方:
+#   docker compose -f docker-compose.test.yml up --build --abort-on-container-exit
+#   docker compose -f docker-compose.test.yml down -v
+
+services:
+  postgres-test:
+    image: postgres:15
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpassword
+      POSTGRES_DB: testdb
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser -d testdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  minio-test:
+    image: minio/minio
+    ports:
+      - "9002:9000"
+      - "9003:9001"
+    environment:
+      MINIO_ROOT_USER: testminio
+      MINIO_ROOT_PASSWORD: testminio123
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  api-test:
+    build:
+      context: ./app
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      minio-test:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://testuser:testpassword@postgres-test:5432/testdb
+      MINIO_ENDPOINT: minio-test
+      MINIO_PORT: "9000"
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: testminio
+      MINIO_SECRET_KEY: testminio123
+      MINIO_BUCKET: media
+      CLIP_MODEL_NAME: ViT-B-32
+      CLIP_PRETRAINED: openai
+      CLIP_PROMPT_TEMPLATE: "a photo of a {tag}"
+      CLIP_SCORE_THRESHOLD: "0.2"
+      CLIP_TOP_K: "10"
+      MAX_FILE_SIZE_MB: "500"
+      PAGINATION_DEFAULT_LIMIT: "30"
+      PAGINATION_MAX_LIMIT: "100"
+      CORS_ORIGINS: "http://localhost:3000"
+      CORS_ALLOW_CREDENTIALS: "true"
+      CORS_ALLOW_METHODS: "*"
+      CORS_ALLOW_HEADERS: "*"
+    command: >
+      sh -c "cd /app && python -m pytest tests/ -v --tb=short"
+    volumes:
+      - model_test_cache:/root/.cache
+
+volumes:
+  postgres_test_data:
+  model_test_cache:
