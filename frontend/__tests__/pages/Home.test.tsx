@@ -5,7 +5,7 @@
  * スクロール済みのアイテムが消えないことを確認する。
  */
 import React from 'react';
-import { render, act, waitFor } from '@testing-library/react';
+import { render, screen, act, waitFor } from '@testing-library/react';
 import Home from '@/app/page';
 import { MediaResponse, TagResponse } from '@/lib/types';
 
@@ -56,7 +56,7 @@ function makeMedia(
 }
 
 function makeTag(id: number, name: string): TagResponse {
-  return { id, name, count: 0 };
+  return { id, name, media_count: 0, created_at: '2024-01-01T00:00:00Z' };
 }
 
 // ---------------------------------------------------------------------------
@@ -79,7 +79,7 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('Home ページ ポーリング動作 (Issue #5)', () => {
-  it('pending がなければ setInterval が設定されない', async () => {
+  it('pending がなければタイマーが設定されない', async () => {
     // 全件 done のレスポンス
     mockGetMediaList.mockResolvedValue({
       items: [makeMedia(1, 'done'), makeMedia(2, 'done')],
@@ -87,7 +87,8 @@ describe('Home ページ ポーリング動作 (Issue #5)', () => {
     });
 
     render(<Home />);
-    await act(async () => { await Promise.resolve(); });
+    // 初期ロードが完了するまで待機
+    await waitFor(() => expect(mockGetMediaList).toHaveBeenCalled());
 
     // タイマーを進めても getMedia は呼ばれないこと
     await act(async () => { jest.advanceTimersByTime(6000); });
@@ -103,9 +104,13 @@ describe('Home ページ ポーリング動作 (Issue #5)', () => {
     mockGetMedia.mockResolvedValue(makeMedia(1, 'done'));
 
     render(<Home />);
-    await act(async () => { await Promise.resolve(); });
+    // アイテムがUIに描画されるまで待つ（エフェクト設定完了を保証）
+    await waitFor(() => {
+      expect(screen.getByText('file1.jpg')).toBeInTheDocument();
+      expect(screen.getByText('file2.jpg')).toBeInTheDocument();
+    });
 
-    const callsBefore = mockGetMediaList.mock.calls.length;
+    const listCallsBefore = mockGetMediaList.mock.calls.length;
 
     // 5秒進めてポーリングを発火
     await act(async () => {
@@ -116,10 +121,10 @@ describe('Home ページ ポーリング動作 (Issue #5)', () => {
     // getMedia が pending item (id=1) に対して呼ばれること
     expect(mockGetMedia).toHaveBeenCalledWith(1);
     // getMediaList の追加呼び出し（全リセット）は発生しないこと
-    expect(mockGetMediaList.mock.calls.length).toBe(callsBefore);
+    expect(mockGetMediaList.mock.calls.length).toBe(listCallsBefore);
   });
 
-  it('ポーリング後もスクロール済みの非pending アイテムが保持される', async () => {
+  it('ポーリング後もスクロール済みの非pending アイテムがUIに保持される', async () => {
     // 最初のロード: 3件（id=1がpending, id=2,3がdone）
     mockGetMediaList.mockResolvedValue({
       items: [makeMedia(1, 'pending'), makeMedia(2, 'done'), makeMedia(3, 'done')],
@@ -128,8 +133,12 @@ describe('Home ページ ポーリング動作 (Issue #5)', () => {
     // ポーリング結果: id=1 が done に更新
     mockGetMedia.mockResolvedValue(makeMedia(1, 'done'));
 
-    const { unmount } = render(<Home />);
-    await act(async () => { await Promise.resolve(); });
+    render(<Home />);
+    // 初期ロード完了 & id=2,3 が画面に表示されることを確認
+    await waitFor(() => {
+      expect(screen.getByText('file2.jpg')).toBeInTheDocument();
+      expect(screen.getByText('file3.jpg')).toBeInTheDocument();
+    });
 
     // ポーリング発火
     await act(async () => {
@@ -137,11 +146,12 @@ describe('Home ページ ポーリング動作 (Issue #5)', () => {
       await Promise.resolve();
     });
 
-    // getMedia の呼び出しが id=1 のみ（全リセットではない）
+    // ポーリング後もスクロール済みアイテム(id=2,3)が画面に残ること
+    expect(screen.getByText('file2.jpg')).toBeInTheDocument();
+    expect(screen.getByText('file3.jpg')).toBeInTheDocument();
+    // getMedia は pending item (id=1) のみ呼ばれること
     expect(mockGetMedia).toHaveBeenCalledTimes(1);
     expect(mockGetMedia).toHaveBeenCalledWith(1);
-
-    unmount();
   });
 
   it('done になったアイテムがある場合に fetchTags が呼ばれる', async () => {
@@ -154,7 +164,8 @@ describe('Home ページ ポーリング動作 (Issue #5)', () => {
     mockGetTags.mockResolvedValue([makeTag(10, 'cat')]);
 
     render(<Home />);
-    await act(async () => { await Promise.resolve(); });
+    // アイテムがUIに描画されるまで待つ
+    await waitFor(() => expect(screen.getByText('file1.jpg')).toBeInTheDocument());
 
     const tagsCallsBefore = mockGetTags.mock.calls.length;
 
@@ -165,5 +176,35 @@ describe('Home ページ ポーリング動作 (Issue #5)', () => {
 
     // done への遷移で fetchTags が追加呼び出しされること
     expect(mockGetTags.mock.calls.length).toBeGreaterThan(tagsCallsBefore);
+  });
+
+  it('1件が rejected でも他のアイテムが正常に更新される (Promise.allSettled)', async () => {
+    mockGetMediaList.mockResolvedValue({
+      items: [makeMedia(1, 'pending'), makeMedia(2, 'pending')],
+      total: 2,
+    });
+    // id=1 は失敗、id=2 は成功
+    mockGetMedia.mockImplementation((id: number) => {
+      if (id === 1) return Promise.reject(new Error('network error'));
+      return Promise.resolve(makeMedia(2, 'done'));
+    });
+
+    render(<Home />);
+    // アイテムがUIに描画されるまで待つ
+    await waitFor(() => {
+      expect(screen.getByText('file1.jpg')).toBeInTheDocument();
+      expect(screen.getByText('file2.jpg')).toBeInTheDocument();
+    });
+
+    // エラーがあってもクラッシュせず id=2 が更新されること
+    await act(async () => {
+      jest.advanceTimersByTime(5000);
+      await Promise.resolve();
+    });
+
+    expect(mockGetMedia).toHaveBeenCalledWith(1);
+    expect(mockGetMedia).toHaveBeenCalledWith(2);
+    // file2.jpg はまだ表示されていること（クラッシュしていない）
+    expect(screen.getByText('file2.jpg')).toBeInTheDocument();
   });
 });
