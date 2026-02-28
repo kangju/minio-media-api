@@ -43,7 +43,7 @@ class Media(Base):
 
     __tablename__ = "media"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     """メディアの主キー。"""
 
     original_filename: Mapped[str] = mapped_column(String, nullable=False)
@@ -93,10 +93,10 @@ class Tag(Base):
 
     __tablename__ = "tags"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     """タグの主キー。"""
 
-    name: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     """タグ名（一意）。"""
 
     created_at: Mapped[datetime] = mapped_column(

@@ -5,9 +5,7 @@
 """
 
 import io
-import json
 import os
-import pathlib
 import sys
 
 # app ディレクトリをパスに追加
@@ -19,7 +17,7 @@ from minio import Minio
 from sqlalchemy import create_engine, text
 
 import models  # noqa: F401 - モデルを Base に登録するために必要
-from config import settings
+from config import load_default_vocabulary, settings
 from database import Base
 
 
@@ -33,12 +31,14 @@ def _reseed_default_tags(conn) -> None:
     TRUNCATE で削除されたデフォルトタグを ON CONFLICT DO NOTHING で復元する。
     テスト間の隔離を維持しつつデフォルトタグを常に利用可能にする。
     """
-    vocab_path = pathlib.Path(__file__).parent.parent / "data" / "default_tags.json"
-    vocab: list[str] = json.loads(vocab_path.read_text(encoding="utf-8"))["vocabulary"]
+    vocab = load_default_vocabulary()
     if not vocab:
         return
-    placeholders = ", ".join(f"('{name.replace(chr(39), chr(39)*2)}')" for name in vocab)
-    conn.execute(text(f"INSERT INTO tags (name) VALUES {placeholders} ON CONFLICT (name) DO NOTHING"))
+    for name in vocab:
+        conn.execute(
+            text("INSERT INTO tags (name) VALUES (:name) ON CONFLICT (name) DO NOTHING"),
+            {"name": name},
+        )
     conn.commit()
 
 

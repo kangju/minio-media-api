@@ -1,6 +1,6 @@
 -- スキーマ初期化スクリプト
 -- DB データディレクトリの初回作成時に PostgreSQL が自動実行する。
--- CREATE TABLE IF NOT EXISTS / DO NOT EXISTS によりべき等（既存データ保護）。
+-- CREATE TABLE/INDEX IF NOT EXISTS と DO ブロック（CREATE TYPE + duplicate_object ハンドリング）によりべき等（既存データ保護）。
 
 -- ENUM 型の作成（IF NOT EXISTS はPostgreSQL 9.3+で使用可能な DO ブロックで対応）
 DO $$ BEGIN
@@ -29,7 +29,6 @@ CREATE TABLE IF NOT EXISTS media (
     error_detail  VARCHAR
 );
 
-CREATE INDEX IF NOT EXISTS ix_media_id        ON media (id);
 CREATE INDEX IF NOT EXISTS ix_media_file_hash ON media (file_hash);
 
 -- tags テーブル
@@ -38,9 +37,6 @@ CREATE TABLE IF NOT EXISTS tags (
     name       VARCHAR NOT NULL UNIQUE,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
-
-CREATE INDEX IF NOT EXISTS ix_tags_id   ON tags (id);
-CREATE INDEX IF NOT EXISTS ix_tags_name ON tags (name);
 
 -- media_tags テーブル
 CREATE TABLE IF NOT EXISTS media_tags (
