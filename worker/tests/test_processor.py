@@ -276,29 +276,8 @@ class TestGetAllTagNames:
 # TestRunClipTask (追加: Issue #4 修正確認)
 # ---------------------------------------------------------------------------
 
-class TestRunClipTaskVocabFix:
+class TestRunClipTaskVocabFix(TestRunClipTask):
     """Issue #4 修正: DB タグ空でも語彙経由でタグが保存されること。"""
-
-    @pytest.fixture(autouse=True)
-    def _setup_model(self):
-        import processor
-        processor._model = MagicMock()
-        processor._tokenizer = MagicMock(return_value=MagicMock())
-        processor._preprocess = MagicMock(
-            return_value=MagicMock(unsqueeze=lambda x: MagicMock())
-        )
-        yield
-        processor._model = None
-        processor._tokenizer = None
-        processor._preprocess = None
-
-    def _upload_test_image(self, minio_client, key: str) -> str:
-        jpeg = make_test_jpeg()
-        minio_client.put_object(
-            "media", key, io.BytesIO(jpeg), length=len(jpeg),
-            content_type="image/jpeg"
-        )
-        return key
 
     def test_tags_saved_with_empty_db_tags_using_vocab(self, db_engine, minio_client):
         """DB にタグがなくてもデフォルト語彙から CLIP タグが保存されること。"""

@@ -97,7 +97,7 @@ export default function Home() {
       fetchTags();
     }, 5000);
     return () => clearInterval(timer);
-  }, [items, fetchMedia]);
+  }, [items, fetchMedia, fetchTags]);
 
   // Infinite scroll
   useEffect(() => {
