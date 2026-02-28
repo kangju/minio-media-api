@@ -3,7 +3,6 @@
 実際の PostgreSQL・MinIO・CLIP モデルを使用する。
 """
 
-import io
 import uuid
 from unittest.mock import MagicMock, patch
 
