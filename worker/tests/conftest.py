@@ -84,10 +84,10 @@ def insert_media(db_engine, minio_key: str = None, clip_status: str = "pending",
             text("""
                 INSERT INTO media
                   (original_filename, minio_key, file_hash, media_type,
-                   clip_status, retry_count, created_at, updated_at)
+                   clip_status, retry_count, created_at)
                 VALUES
                   (:fname, :key, :hash, 'image',
-                   :status, :retry, now(), now())
+                   :status, :retry, now())
                 RETURNING id
             """),
             {

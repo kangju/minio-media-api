@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import text
 
 from processor import (
+    _get_all_tag_names,
     _get_media_info,
     claim_pending,
     reset_running,
@@ -235,3 +236,91 @@ class TestRunClipTask:
                 {"mid": mid}
             ).scalar()
         assert count == 1
+
+
+# ---------------------------------------------------------------------------
+# TestGetAllTagNames
+# ---------------------------------------------------------------------------
+
+class TestGetAllTagNames:
+    """_get_all_tag_names(): DB + デフォルト語彙マージのテスト。"""
+
+    def test_returns_vocab_when_db_empty(self, db_engine):
+        """DB にタグがない場合でもデフォルト語彙が返ること（Issue #4 主要修正）。"""
+        names = _get_all_tag_names()
+        assert len(names) > 0, "DB が空でもデフォルト語彙が返ること"
+
+    def test_includes_db_tags(self, db_engine):
+        """DB に登録したカスタムタグが候補に含まれること。"""
+        with db_engine.connect() as conn:
+            conn.execute(
+                text("INSERT INTO tags (name, created_at) VALUES ('my_custom_tag_xyz', now())")
+            )
+            conn.commit()
+        names = _get_all_tag_names()
+        assert "my_custom_tag_xyz" in names
+
+    def test_no_duplicates(self, db_engine):
+        """DB タグと語彙に重複があっても候補は重複なしであること。"""
+        # 語彙ファイルに存在するタグ "cat" を DB にも入れる
+        with db_engine.connect() as conn:
+            conn.execute(
+                text("INSERT INTO tags (name, created_at) VALUES ('cat', now()) ON CONFLICT (name) DO NOTHING")
+            )
+            conn.commit()
+        names = _get_all_tag_names()
+        assert names.count("cat") == 1
+
+
+# ---------------------------------------------------------------------------
+# TestRunClipTask (追加: Issue #4 修正確認)
+# ---------------------------------------------------------------------------
+
+class TestRunClipTaskVocabFix:
+    """Issue #4 修正: DB タグ空でも語彙経由でタグが保存されること。"""
+
+    @pytest.fixture(autouse=True)
+    def _setup_model(self):
+        import processor
+        processor._model = MagicMock()
+        processor._tokenizer = MagicMock(return_value=MagicMock())
+        processor._preprocess = MagicMock(
+            return_value=MagicMock(unsqueeze=lambda x: MagicMock())
+        )
+        yield
+        processor._model = None
+        processor._tokenizer = None
+        processor._preprocess = None
+
+    def _upload_test_image(self, minio_client, key: str) -> str:
+        jpeg = make_test_jpeg()
+        minio_client.put_object(
+            "media", key, io.BytesIO(jpeg), length=len(jpeg),
+            content_type="image/jpeg"
+        )
+        return key
+
+    def test_tags_saved_with_empty_db_tags_using_vocab(self, db_engine, minio_client):
+        """DB にタグがなくてもデフォルト語彙から CLIP タグが保存されること。"""
+        key = f"test/{uuid.uuid4()}.jpg"
+        self._upload_test_image(minio_client, key)
+        mid = insert_media(db_engine, minio_key=key, clip_status="running")
+
+        # DB のタグは空のまま実行（語彙ファイルの "cat" がヒット）
+        with patch("processor._analyze", return_value=[{"name": "cat", "score": 0.88}]):
+            run_clip_task(mid)
+
+        with db_engine.connect() as conn:
+            status = conn.execute(
+                text("SELECT clip_status FROM media WHERE id = :id"), {"id": mid}
+            ).scalar()
+            tag_count = conn.execute(
+                text("""
+                    SELECT COUNT(*) FROM media_tags mt
+                    JOIN tags t ON t.id = mt.tag_id
+                    WHERE mt.media_id = :mid AND mt.source = 'clip'
+                """),
+                {"mid": mid},
+            ).scalar()
+        assert status == "done"
+        assert tag_count == 1, "語彙から CLIP タグが1件以上保存されること"
