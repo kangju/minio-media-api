@@ -447,6 +447,74 @@ class TestSortMedia:
         assert r.status_code == 422
 
 
+class TestSortWithManyMedia:
+    """150枚の大量データでのソート・ページネーション・フィルタテスト。
+
+    many_media フィクスチャで 150 枚を投入し、大量データ環境での動作を検証する。
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup(self, many_media):
+        """150枚の画像を投入するセットアップ。"""
+
+    def test_filename_asc_first_item(self, client):
+        """ファイル名昇順で file_001.jpg が先頭になる。"""
+        r = client.get("/media?sort_by=original_filename&sort_order=asc&limit=1")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total"] == 150
+        assert data["items"][0]["original_filename"] == "file_001.jpg"
+
+    def test_filename_desc_first_item(self, client):
+        """ファイル名降順で file_150.jpg が先頭になる。"""
+        r = client.get("/media?sort_by=original_filename&sort_order=desc&limit=1")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total"] == 150
+        assert data["items"][0]["original_filename"] == "file_150.jpg"
+
+    def test_created_at_asc_first_item(self, client):
+        """作成日時昇順で最初にアップロードした file_001.jpg が先頭になる。"""
+        r = client.get("/media?sort_by=created_at&sort_order=asc&limit=1")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total"] == 150
+        assert data["items"][0]["original_filename"] == "file_001.jpg"
+
+    def test_created_at_desc_first_item(self, client):
+        """作成日時降順で最後にアップロードした file_150.jpg が先頭になる。"""
+        r = client.get("/media?sort_by=created_at&sort_order=desc&limit=1")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total"] == 150
+        assert data["items"][0]["original_filename"] == "file_150.jpg"
+
+    def test_pagination_returns_50_items(self, client):
+        """デフォルトのページサイズ（50件）で正しく返る。"""
+        r = client.get("/media?limit=50&offset=0")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total"] == 150
+        assert len(data["items"]) == 50
+
+    def test_tag_filter_with_many_items(self, client):
+        """150枚の中でタグ付き画像のみフィルタリングできる。"""
+        # タグ付き画像を1枚追加アップロード
+        r_up = client.post(
+            "/media",
+            files=[make_upload_file(MINIMAL_JPEG_2, "tagged.jpg", "image/jpeg")],
+            data={"tags": ["bulk_test_tag"]},
+        )
+        assert r_up.status_code == 201
+        tagged_id = r_up.json()["id"]
+
+        r = client.get("/media?tag=bulk_test_tag")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total"] == 1
+        assert data["items"][0]["id"] == tagged_id
+
+
 class TestGetMediaById:
     """GET /media/{id} エンドポイントのテスト。"""
 

@@ -220,3 +220,17 @@ def _make_minimal_jpeg_blue() -> bytes:
 
 # テスト用サンプル画像2（MINIMAL_JPEG とは異なるバイト列の有効な JPEG）
 MINIMAL_JPEG_2 = _make_minimal_jpeg_blue()
+
+
+@pytest.fixture
+def many_media(client):
+    """150枚のメディアを投入する常設フィクスチャ。
+
+    今後の負荷テストで `many_media` をパラメータとして受け取ることで
+    常に 150 枚の状態で大量データテストを実行できる。
+    ファイル名は file_001.jpg 〜 file_150.jpg の連番。
+    同一コンテンツなので MinIO への実アップロードは初回のみ（高速）。
+    """
+    for i in range(1, 151):
+        filename = f"file_{i:03d}.jpg"
+        client.post("/media", files=[make_upload_file(MINIMAL_JPEG, filename, "image/jpeg")])

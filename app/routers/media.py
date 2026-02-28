@@ -262,7 +262,11 @@ def get_media_file(
     if media is None:
         raise HTTPException(status_code=404, detail="メディアが見つかりません。")
     data, content_type = minio.get_file(media.minio_key)
-    return StreamingResponse(io.BytesIO(data), media_type=content_type)
+    headers = {
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "ETag": f'"{media.file_hash}"',
+    }
+    return StreamingResponse(io.BytesIO(data), media_type=content_type, headers=headers)
 
 
 @router.delete("/{media_id}", status_code=204)

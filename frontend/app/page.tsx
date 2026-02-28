@@ -33,14 +33,16 @@ export default function Home() {
   const [hasMore, setHasMore] = useState(true);
   const offsetRef = useRef(0);
   const loadingRef = useRef(false);
+  const requestIdRef = useRef(0);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const filterPanelRef = useRef<HTMLDivElement>(null);
   const LIMIT = 50;
 
   const fetchMedia = useCallback(async (reset = false) => {
-    if (loadingRef.current) return;
+    if (!reset && loadingRef.current) return;
     loadingRef.current = true;
     setLoading(true);
+    const requestId = ++requestIdRef.current;
     try {
       const currentOffset = reset ? 0 : offsetRef.current;
       const data = await getMediaList({
@@ -54,6 +56,7 @@ export default function Home() {
         sort_by: sortBy,
         sort_order: sortOrder,
       });
+      if (requestId !== requestIdRef.current) return;
       const newItems = data.items;
       if (reset) {
         setItems(newItems);
@@ -65,6 +68,7 @@ export default function Home() {
       setTotal(data.total);
       setHasMore(currentOffset + newItems.length < data.total);
     } catch (e) {
+      if (requestId !== requestIdRef.current) return;
       console.error(e);
     }
     loadingRef.current = false;

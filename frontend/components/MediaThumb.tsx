@@ -56,6 +56,7 @@ export default function MediaThumb({
         <img
           src={url}
           alt={media.original_filename}
+          loading="lazy"
           style={{
             width: '100%',
             height: '100%',
