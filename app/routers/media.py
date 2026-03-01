@@ -190,7 +190,7 @@ def list_media(
     created_from: Optional[datetime] = Query(default=None),
     created_to: Optional[datetime] = Query(default=None),
     offset: int = Query(default=0, ge=0),
-    limit: Optional[int] = Query(default=None),
+    limit: Optional[int] = Query(default=None, ge=1),
     sort_by: Literal["created_at", "original_filename"] = Query(default="created_at"),
     sort_order: Literal["asc", "desc"] = Query(default="desc"),
     db: Session = Depends(get_db),

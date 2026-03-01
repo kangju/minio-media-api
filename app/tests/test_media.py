@@ -381,6 +381,70 @@ class TestGetMediaList:
         assert r.json()["items"] == []
 
 
+class TestListMediaPagination:
+    """GET /media の limit / offset パラメータバリデーションテスト。"""
+
+    # ------------------------------------------------------------------ limit
+    def test_limit_negative_returns_422(self, client):
+        """limit に負の値を渡すと 422 になる（下限バリデーション）。"""
+        r = client.get("/media?limit=-1")
+        assert r.status_code == 422
+
+    def test_limit_zero_returns_422(self, client):
+        """limit=0 は 422 になる（ge=1 バリデーション）。"""
+        r = client.get("/media?limit=0")
+        assert r.status_code == 422
+
+    def test_limit_string_returns_422(self, client):
+        """limit に文字列を渡すと 422 になる（型バリデーション）。"""
+        r = client.get("/media?limit=abc")
+        assert r.status_code == 422
+
+    def test_limit_one_returns_200(self, client):
+        """limit=1 は正常で、items が 1 件以下になる。"""
+        r = client.get("/media?limit=1")
+        assert r.status_code == 200
+        data = r.json()
+        assert len(data["items"]) <= 1
+
+    def test_limit_default_is_applied(self, client):
+        """limit 省略時はデフォルト値（30）が適用される。"""
+        r = client.get("/media")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["limit"] == 30
+
+    def test_limit_large_is_capped(self, client):
+        """limit=999 はエラーにならず max_limit（100）でキャップされる。"""
+        r = client.get("/media?limit=999")
+        assert r.status_code == 200
+        data = r.json()
+        assert len(data["items"]) <= 100
+
+    # ------------------------------------------------------------------ offset
+    def test_offset_negative_returns_422(self, client):
+        """offset に負の値を渡すと 422 になる（既存の ge=0 バリデーション確認）。"""
+        r = client.get("/media?offset=-1")
+        assert r.status_code == 422
+
+    def test_offset_string_returns_422(self, client):
+        """offset に文字列を渡すと 422 になる（型バリデーション）。"""
+        r = client.get("/media?offset=xyz")
+        assert r.status_code == 422
+
+    def test_offset_large_returns_empty(self, client):
+        """offset が総件数を超える場合は 200 で空リストになる。"""
+        r = client.get("/media?offset=9999")
+        assert r.status_code == 200
+        assert r.json()["items"] == []
+
+    # ------------------------------------------------------------------ 組み合わせ
+    def test_limit_negative_offset_valid_returns_422(self, client):
+        """limit が異常でも 422 になる（offset が正常でも）。"""
+        r = client.get("/media?limit=-1&offset=0")
+        assert r.status_code == 422
+
+
 class TestSortMedia:
     """GET /media のソートパラメータテスト。"""
 
