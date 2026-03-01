@@ -27,8 +27,14 @@ jest.mock('@/lib/api', () => ({
 }));
 
 // IntersectionObserver をスタブ化（jsdom に存在しない）
+// コールバックを外部からトリガーできるよう最後のインスタンスを記録する
+let lastIntersectionCallback: ((entries: { isIntersecting: boolean }[]) => void) | null = null;
+
 beforeAll(() => {
   global.IntersectionObserver = class {
+    constructor(cb: (entries: { isIntersecting: boolean }[]) => void) {
+      lastIntersectionCallback = cb;
+    }
     observe = jest.fn();
     disconnect = jest.fn();
     unobserve = jest.fn();
@@ -271,4 +277,37 @@ describe('Home ページ ポーリング動作 (Issue #5)', () => {
     // エラー後もローディング表示が残らないこと（finally で setLoading(false) が呼ばれる）
     expect(screen.queryByText('LOADING...')).not.toBeInTheDocument();
   });
-});
+
+  it('フィルタfetch中にスクロールfetchがブロックされる (inflightRef)', async () => {
+    // inflightRef カウンタ方式の回帰テスト:
+    // reset=true（フィルタfetch）実行中にreset=false（スクロールfetch）が呼ばれても
+    // inflightRef.current > 0 でガードされること
+    let resolveFirst!: (v: unknown) => void;
+    const firstFetch = new Promise((r) => { resolveFirst = r; });
+    mockGetMediaList
+      .mockReturnValueOnce(firstFetch)                             // 1st fetch (reset=true, 保留)
+      .mockResolvedValue({ items: [makeMedia(5, 'done')], total: 1 }); // 2nd fetch
+
+    await act(async () => {
+      render(<Home />);
+    });
+
+    // 1st fetch（reset=true）は進行中、callsは1回
+    expect(mockGetMediaList).toHaveBeenCalledTimes(1);
+
+    // IntersectionObserver コールバックを直接トリガーしてスクロールfetchを試みる
+    // inflightRef.current > 0 なのでブロックされるはず
+    if (lastIntersectionCallback) {
+      act(() => { lastIntersectionCallback!([{ isIntersecting: true }]); });
+    }
+
+    // スクロールfetch は inflightRef ガードで弾かれるので呼び出し回数は変わらない
+    expect(mockGetMediaList).toHaveBeenCalledTimes(1);
+
+    // 1st fetch を解決してカウンタを 0 に戻す
+    await act(async () => {
+      resolveFirst({ items: [makeMedia(1, 'done')], total: 1 });
+      await Promise.resolve();
+    });
+  });
+})

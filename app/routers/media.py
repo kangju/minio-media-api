@@ -315,6 +315,8 @@ def analyze_media(
         raise HTTPException(
             status_code=403, detail="動画ファイルは CLIP 解析に対応していません。"
         )
+    if media.minio_key is None:
+        raise HTTPException(status_code=409, detail="このメディアはファイルが存在しません。")
 
     data, _ = minio.get_file(media.minio_key)
     all_tags = crud.get_all_tags(db)

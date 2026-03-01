@@ -32,15 +32,15 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const offsetRef = useRef(0);
-  const loadingRef = useRef(false);
+  const inflightRef = useRef(0);
   const requestIdRef = useRef(0);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const filterPanelRef = useRef<HTMLDivElement>(null);
   const LIMIT = 50;
 
   const fetchMedia = useCallback(async (reset = false) => {
-    if (!reset && loadingRef.current) return;
-    loadingRef.current = true;
+    if (!reset && inflightRef.current > 0) return;
+    inflightRef.current++;
     setLoading(true);
     if (reset) setHasMore(true);
     const requestId = ++requestIdRef.current;
@@ -72,8 +72,10 @@ export default function Home() {
       if (requestId !== requestIdRef.current) return;
       console.error(e);
     } finally {
-      loadingRef.current = false;
-      setLoading(false);
+      inflightRef.current--;
+      if (inflightRef.current === 0) {
+        setLoading(false);
+      }
     }
   }, [activeTags, mediaType, includeDeleted, createdFrom, createdTo, sortBy, sortOrder]);
 
@@ -144,7 +146,7 @@ export default function Home() {
     if (!sentinel) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loadingRef.current) {
+        if (entries[0].isIntersecting && hasMore && inflightRef.current === 0) {
           fetchMedia(false);
         }
       },

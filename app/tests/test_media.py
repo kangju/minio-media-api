@@ -1034,3 +1034,25 @@ class TestRunningResetOnStartup:
             )
         finally:
             db.close()
+
+
+class TestAnalyzeMediaMissingKey:
+    """POST /media/{id}/analyze で minio_key=None のレコードが 409 を返すテスト。"""
+
+    def test_analyze_missing_minio_key_returns_409(self, client, db_engine):
+        """minio_key が None のメディアに対して analyze は 409 になる。"""
+        from sqlalchemy import text
+
+        # minio_key=None のレコードを直接 DB に挿入（アップロード失敗時と同じ状態）
+        with db_engine.connect() as conn:
+            result = conn.execute(
+                text(
+                    "INSERT INTO media (original_filename, minio_key, file_hash, media_type, clip_status)"
+                    " VALUES ('error.jpg', NULL, 'errorhash002', 'image', 'error') RETURNING id"
+                )
+            )
+            media_id = result.scalar_one()
+            conn.commit()
+
+        r = client.post(f"/media/{media_id}/analyze")
+        assert r.status_code == 409
