@@ -35,6 +35,7 @@ export default React.memo(function MediaThumb({
 
   return (
     <div
+      data-filename={media.original_filename}
       onClick={handleClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}

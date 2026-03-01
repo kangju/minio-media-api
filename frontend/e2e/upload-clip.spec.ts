@@ -49,7 +49,7 @@ test.describe('アップロード → 非同期CLIP', () => {
   });
 
   test('CLIPアナライズAPIが直接呼ばれて結果が返ってくる', async ({ request }) => {
-    const listRes = await request.get('http://localhost:3000/api/media?limit=1');
+    const listRes = await request.get('/api/media?limit=1');
     expect(listRes.ok()).toBeTruthy();
     const listData = await listRes.json();
 
@@ -67,7 +67,7 @@ test.describe('アップロード → 非同期CLIP', () => {
     }
 
     const analyzeRes = await request.post(
-      `http://localhost:3000/api/media/${mediaId}/analyze`,
+      `/api/media/${mediaId}/analyze`,
       { data: {} }
     );
     expect(analyzeRes.ok()).toBeTruthy();
@@ -80,7 +80,7 @@ test.describe('アップロード → 非同期CLIP', () => {
   });
 
   test('CLIPタグはデフォルト語彙から生成されて新規DBタグが作られる', async ({ request }) => {
-    const tagsRes = await request.get('http://localhost:3000/api/tags');
+    const tagsRes = await request.get('/api/tags');
     expect(tagsRes.ok()).toBeTruthy();
     const tags = await tagsRes.json();
     expect(tags.length).toBeGreaterThanOrEqual(0);
@@ -102,7 +102,7 @@ test.describe('アップロード → 非同期CLIP', () => {
     await page.waitForSelector('text=Tags');
 
     // まずmediaIdを取得
-    const listRes = await request.get('http://localhost:3000/api/media?limit=1');
+    const listRes = await request.get('/api/media?limit=1');
     const listData = await listRes.json();
     if (listData.total === 0) return;
     const mediaId = listData.items[0].id;
@@ -122,7 +122,7 @@ test.describe('アップロード → 非同期CLIP', () => {
     await page.waitForTimeout(1000);
 
     // APIでclip_status確認
-    const mediaRes = await request.get(`http://localhost:3000/api/media/${mediaId}`);
+    const mediaRes = await request.get(`/api/media/${mediaId}`);
     if (mediaRes.ok()) {
       const mediaData = await mediaRes.json();
       expect(mediaData.clip_status).toBe('done');

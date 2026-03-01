@@ -290,12 +290,13 @@ test.describe('ソート機能', () => {
     // 最後の API リクエストが正しいソート条件（sort_by=original_filename）で発行されていること
     expect(lastSortBy).toBe('original_filename');
 
-    // APIレスポンスの先頭5件が original_filename 降順（sort_order=desc）に並んでいることを確認
-    // page.request で直接 API を呼び出すことで中間レスポンスの競合を排除する
-    const apiResp = await page.request.get('/api/media?sort_by=original_filename&sort_order=desc&limit=5');
-    const json = await apiResp.json();
-    const firstFilenames: string[] =
-      json.items?.map((i: { original_filename: string }) => i.original_filename) ?? [];
+    // APIレスポンスの先頭5件が original_filename 降順（sort_order=desc）に並んでいることを
+    // DOM の実表示順（[data-filename] 属性）で検証する。
+    // page.request.get() ではなく DOM を確認することで、競合レスポンスによる表示順崩れを検知できる。
+    const thumbs = page.locator('[data-filename]');
+    const firstFilenames = await thumbs.evaluateAll(
+      (els: Element[]) => els.slice(0, 5).map((el) => el.getAttribute('data-filename') ?? '')
+    );
     expect(firstFilenames.length).toBeGreaterThan(1);
     const sorted = [...firstFilenames].sort((a, b) => b.localeCompare(a));
     expect(firstFilenames).toEqual(sorted);
