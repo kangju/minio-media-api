@@ -5,7 +5,7 @@
  * スクロール済みのアイテムが消えないことを確認する。
  */
 import React from 'react';
-import { render, screen, act, waitFor } from '@testing-library/react';
+import { render, screen, act, waitFor, fireEvent } from '@testing-library/react';
 import Home from '@/app/page';
 import { MediaResponse, TagResponse } from '@/lib/types';
 
@@ -359,58 +359,77 @@ describe('Issue #14 – stale request クリーンアップ', () => {
   });
 
   it('stale request が返っても loading=false になる（finally クリーンアップ）', async () => {
-    // リクエスト1（保留）とリクエスト2（先に解決）を用意
+    // fetch1（保留）が解決された後に finally が実行され LOADING... が消えることを確認
     let resolveFirst!: (v: unknown) => void;
     const firstFetch = new Promise((r) => { resolveFirst = r; });
-    const secondResult = { items: [makeMedia(2)], total: 1 };
 
-    // 1回目: 保留, 2回目: 即解決
-    mockGetMediaList
-      .mockReturnValueOnce(firstFetch)
-      .mockResolvedValueOnce(secondResult);
+    // 1回目: 保留
+    mockGetMediaList.mockReturnValueOnce(firstFetch);
 
     await act(async () => {
       render(<Home />);
     });
 
-    // 2回目のフェッチ（requestIdRef が進む）を解決する
-    // ※実際には filter state 変更が必要だが、ここでは inflightRef 動作を直接確認
-    // リクエスト1を解決（この時点で requestIdRef は 1 になっているが stale 扱い）
+    // fetch1 進行中 → LOADING... が表示されているはず
+    expect(screen.getByText('LOADING...')).toBeInTheDocument();
+
+    // fetch1 を解決 → finally で inflightRef=0 → loading=false → LOADING... が消える
     await act(async () => {
       resolveFirst({ items: [makeMedia(1)], total: 1 });
       await Promise.resolve();
     });
 
-    // stale でも finally が実行されるので loading は false のまま
-    // （Home コンポーネントが loading=true のまま固まっていないことを確認）
-    // ローディング spinner が表示されていないことを確認
-    expect(document.querySelector('[data-testid="loading"]')).toBeNull();
+    // stale でも finally が実行されるので loading は解除される
+    await waitFor(() => {
+      expect(screen.queryByText('LOADING...')).toBeNull();
+    });
   });
 
   it('stale request の結果は items に反映されない', async () => {
-    // requestIdRef パターン: 後発リクエストが先に解決 → 先発リクエスト結果は無視
+    // stale シナリオ:
+    // 1. fetch1 (filter A, 保留)
+    // 2. filter 変更 → fetch2 (filter B, 即解決) → items = [makeMedia(99)]
+    // 3. fetch1 解決 → requestId が古い（stale）→ setItems されない
+    // 4. items は [makeMedia(99)] のまま（makeMedia(1) が混入しない）
     let resolveFirst!: (v: unknown) => void;
     const firstFetch = new Promise((r) => { resolveFirst = r; });
-    const secondResult = { items: [makeMedia(99, 'done')], total: 1 };
 
+    // fetch1: 保留, fetch2: 即解決（filter 変更後に呼ばれる）
     mockGetMediaList
       .mockReturnValueOnce(firstFetch)
-      .mockResolvedValueOnce(secondResult);
+      .mockResolvedValueOnce({ items: [makeMedia(99)], total: 1 });
 
     await act(async () => {
       render(<Home />);
     });
 
-    // 1回目のリクエストが stale になった後に解決 → items には反映されない
-    // (requestIdRef は mount 時に 1 で、2回目フェッチで 2 になるが、
-    //  このテストでは同一 fetchMedia 呼び出し内での stale は catch ブロックで確認)
+    // fetch1 は進行中（inflightRef=1）
+    // filter を変更して fetch2 をトリガー
+    // reset=true なので inflightRef のガードをスキップして発火する
+    const mediaTypeSelect = document.querySelector('[data-testid="media-type-select"]') as HTMLSelectElement;
+    if (mediaTypeSelect) {
+      await act(async () => {
+        fireEvent.change(mediaTypeSelect, { target: { value: 'image' } });
+        await Promise.resolve();
+      });
+    }
+
+    // fetch2 が即解決 → items = [makeMedia(99)]
+    await waitFor(() => {
+      expect(screen.queryByText('file99.jpg')).toBeInTheDocument();
+    });
+
+    // fetch1 を解決（stale: requestId=1 ≠ requestIdRef.current=2）
     await act(async () => {
       resolveFirst({ items: [makeMedia(1)], total: 1 });
       await Promise.resolve();
     });
 
-    // 初期フェッチは reset=true で 1 回のみ → getMediaList は 1 回呼ばれる
-    expect(mockGetMediaList).toHaveBeenCalledTimes(1);
+    // stale な fetch1 の結果は無視されるので file1.jpg は表示されない
+    await waitFor(() => {
+      expect(screen.queryByText('file1.jpg')).toBeNull();
+      expect(screen.queryByText('file99.jpg')).toBeInTheDocument();
+    });
   });
 })
 
