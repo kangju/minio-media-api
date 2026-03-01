@@ -294,9 +294,9 @@ test.describe('ソート機能', () => {
     const alts = await page.locator('img[alt]').evaluateAll(
       (els) => els.slice(0, 5).map((el) => el.getAttribute('alt') ?? '')
     );
-    if (alts.length > 1) {
-      const sorted = [...alts].sort((a, b) => b.localeCompare(a));
-      expect(alts).toEqual(sorted);
-    }
+    // データが複数件あることを先に保証（0〜1件ではソート検証が無意味なため失敗させる）
+    expect(alts.length).toBeGreaterThan(1);
+    const sorted = [...alts].sort((a, b) => b.localeCompare(a));
+    expect(alts).toEqual(sorted);
   });
 });
