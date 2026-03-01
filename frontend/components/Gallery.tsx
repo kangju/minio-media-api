@@ -117,6 +117,8 @@ function ListRow({
         borderRadius: 4,
         cursor: 'pointer',
         transition: 'all 0.15s',
+        contentVisibility: 'auto',
+        containIntrinsicSize: '0 68px',
       }}
     >
       <div style={{ width: 48, height: 48, background: '#1a1a1a', borderRadius: 2, overflow: 'hidden', flexShrink: 0 }}>
@@ -132,6 +134,7 @@ function ListRow({
             src={getMediaFileUrl(item.id)}
             style={{ width: '100%', height: '100%', objectFit: 'cover', transform: hovered ? 'scale(1.15)' : 'scale(1)', transition: 'transform 0.3s ease' }}
             muted
+            preload="none"
           />
         )}
       </div>

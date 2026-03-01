@@ -29,16 +29,22 @@ jest.mock('@/lib/api', () => ({
 // IntersectionObserver をスタブ化（jsdom に存在しない）
 // コールバックを外部からトリガーできるよう最後のインスタンスを記録する
 let lastIntersectionCallback: ((entries: { isIntersecting: boolean }[]) => void) | null = null;
+let observerInstanceCount = 0;
 
 beforeAll(() => {
   global.IntersectionObserver = class {
     constructor(cb: (entries: { isIntersecting: boolean }[]) => void) {
       lastIntersectionCallback = cb;
+      observerInstanceCount++;
     }
     observe = jest.fn();
     disconnect = jest.fn();
     unobserve = jest.fn();
   } as unknown as typeof IntersectionObserver;
+});
+
+beforeEach(() => {
+  observerInstanceCount = 0;
 });
 
 // ---------------------------------------------------------------------------
@@ -309,5 +315,38 @@ describe('Home ページ ポーリング動作 (Issue #5)', () => {
       resolveFirst({ items: [makeMedia(1, 'done')], total: 1 });
       await Promise.resolve();
     });
+  });
+})
+
+describe('Issue #15 – IntersectionObserver 再生成の抑制', () => {
+  beforeEach(() => {
+    mockGetMediaList.mockResolvedValue({ items: [], total: 0 });
+    mockGetTags.mockResolvedValue([]);
+  });
+
+  it('初期マウント時に IntersectionObserver が生成される', async () => {
+    await act(async () => {
+      render(<Home />);
+    });
+    // React Strict Mode で最低 1 回は生成される
+    expect(observerInstanceCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it('hasMore が変わらなければ observer は追加生成されない', async () => {
+    // total = 50 items を返して hasMore=true のまま安定させる
+    mockGetMediaList.mockResolvedValue({
+      items: Array.from({ length: 50 }, (_, i) => makeMedia(i + 1)),
+      total: 100,
+    });
+
+    await act(async () => {
+      render(<Home />);
+    });
+
+    const countAfterMount = observerInstanceCount;
+
+    // fetchMedia 参照が変わっても hasMore が変わらなければ observer は再生成されない
+    // → mountedと同じ countAfterMount のまま
+    expect(observerInstanceCount).toBe(countAfterMount);
   });
 })

@@ -36,6 +36,7 @@ export default function Home() {
   const requestIdRef = useRef(0);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const filterPanelRef = useRef<HTMLDivElement>(null);
+  const fetchMediaRef = useRef<(reset?: boolean) => Promise<void>>(async () => {});
   const LIMIT = 50;
 
   const fetchMedia = useCallback(async (reset = false) => {
@@ -83,6 +84,10 @@ export default function Home() {
     getTags().then(setTags).catch(console.error);
   }, []);
 
+  // Keep fetchMediaRef up-to-date so IntersectionObserver always calls the latest version
+  useEffect(() => {
+    fetchMediaRef.current = fetchMedia;
+  }, [fetchMedia]);
 
   // Initial load and when filters change
   // fetchMedia を .then() コールバック経由で呼び、effect 本体からの同期 setState を回避 (react-hooks/set-state-in-effect)
@@ -147,14 +152,14 @@ export default function Home() {
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && hasMore && inflightRef.current === 0) {
-          fetchMedia(false);
+          fetchMediaRef.current(false);
         }
       },
       { threshold: 0.1 }
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMore, fetchMedia]);
+  }, [hasMore]);
 
   function handleTagToggle(tagName: string) {
     setActiveTags((prev) =>
