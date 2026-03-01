@@ -95,12 +95,17 @@ export default function Home() {
     fetchTags();
   }, [fetchTags]);
 
-  // pendingIdsRef: レンダー中に同期更新（エフェクト不要、スクロールでタイマーがリセットされない）
+  // pendingIdsRef: ポーリング関数が常に最新の ID リストにアクセスできるよう useEffect 内で更新
   const pendingIdsRef = useRef<number[]>([]);
-  pendingIdsRef.current = items
-    .filter((i) => i.clip_status === 'pending' || i.clip_status === 'running')
-    .map((i) => i.id);
-  const hasPending = pendingIdsRef.current.length > 0;
+  // hasPending はステートから直接算出（レンダー中に ref を書き換えない）
+  const hasPending = items.some(
+    (i) => i.clip_status === 'pending' || i.clip_status === 'running'
+  );
+  useEffect(() => {
+    pendingIdsRef.current = items
+      .filter((i) => i.clip_status === 'pending' || i.clip_status === 'running')
+      .map((i) => i.id);
+  }, [items]);
 
   // Polling: pending/running アイテムのみ個別取得して in-place 更新
   useEffect(() => {

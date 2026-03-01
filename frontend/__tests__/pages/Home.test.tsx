@@ -207,4 +207,26 @@ describe('Home ページ ポーリング動作 (Issue #5)', () => {
     // file2.jpg はまだ表示されていること（クラッシュしていない）
     expect(screen.getByText('file2.jpg')).toBeInTheDocument();
   });
+
+  it('pending/running アイテムを含む一覧をレンダーしても React エラーが発生しない', async () => {
+    // pendingIdsRef をレンダー中に書き換えないことの回帰テスト
+    mockGetMediaList.mockResolvedValue({
+      items: [
+        makeMedia(1, 'pending'),
+        makeMedia(2, 'running'),
+        makeMedia(3, 'done'),
+      ],
+      total: 3,
+    });
+    mockGetMedia.mockResolvedValue(makeMedia(1, 'done'));
+
+    // エラーなくレンダーできること
+    await act(async () => {
+      render(<Home />);
+    });
+
+    // pending/running の両バッジが表示されること
+    const pendingBadges = screen.getAllByTestId('pending-badge');
+    expect(pendingBadges.length).toBeGreaterThanOrEqual(2);
+  });
 });
