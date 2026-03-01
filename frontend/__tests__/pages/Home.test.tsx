@@ -358,7 +358,7 @@ describe('Issue #14 – stale request クリーンアップ', () => {
     mockGetTags.mockResolvedValue([]);
   });
 
-  it('stale request が返っても loading=false になる（finally クリーンアップ）', async () => {
+  it('pending fetch が finally で loading を解除する（finally クリーンアップ）', async () => {
     // fetch1（保留）が解決された後に finally が実行され LOADING... が消えることを確認
     let resolveFirst!: (v: unknown) => void;
     const firstFetch = new Promise((r) => { resolveFirst = r; });
@@ -469,5 +469,11 @@ describe('Issue #14 – 重複アイテム混入防止', () => {
     // 2回スクロールトリガー → inflightRef > 0 でブロック → 余分な fetch なし
     // 最終的に getMediaList は最大 2 回（初期 + スクロール 1 回）
     expect(mockGetMediaList.mock.calls.length).toBeLessThanOrEqual(2);
+
+    // DOM 上に重複アイテムが存在しないことを確認（setItems が正しく機能している）
+    const imgs = document.querySelectorAll('img');
+    const alts = Array.from(imgs).map((img) => img.getAttribute('alt')!);
+    expect(alts.length).toBe(100); // page1(50) + page2(50)
+    expect(new Set(alts).size).toBe(alts.length); // 重複なし
   });
 })
