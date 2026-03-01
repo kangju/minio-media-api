@@ -81,9 +81,11 @@ export default function Home() {
   }, []);
 
 
+  // Initial load and when filters change
+  // fetchMedia を .then() コールバック経由で呼び、effect 本体からの同期 setState を回避 (react-hooks/set-state-in-effect)
   useEffect(() => {
     offsetRef.current = 0;
-    fetchMedia(true);
+    void Promise.resolve().then(() => fetchMedia(true));
   }, [activeTags, mediaType, includeDeleted, createdFrom, createdTo, sortBy, sortOrder, fetchMedia]);
 
   // pendingIdsRef: ポーリング関数が常に最新の ID リストにアクセスできるよう useEffect 内で更新
