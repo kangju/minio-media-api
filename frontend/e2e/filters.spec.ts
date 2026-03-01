@@ -267,26 +267,11 @@ test.describe('ソート機能', () => {
 
     // 最後のメディア一覧 API リクエストの sort_by パラメータを記録する
     let lastSortBy = '';
-    // APIレスポンスから先頭5件のファイル名を記録（img/video に依存しないメディア種別中立な方法）
-    let firstFilenames: string[] = [];
     page.on('request', (req) => {
       const url = req.url();
       if (url.includes('/api/media') && !url.match(/\/api\/media\/\d/)) {
         const m = url.match(/sort_by=([^&]+)/);
         if (m) lastSortBy = decodeURIComponent(m[1]);
-      }
-    });
-    page.on('response', async (resp) => {
-      const url = resp.url();
-      if (url.includes('/api/media') && !url.match(/\/api\/media\/\d/)) {
-        try {
-          const json = await resp.json();
-          if (json.items?.length > 0) {
-            firstFilenames = json.items
-              .slice(0, 5)
-              .map((i: { original_filename: string }) => i.original_filename);
-          }
-        } catch { /* ignore */ }
       }
     });
 
@@ -306,7 +291,11 @@ test.describe('ソート機能', () => {
     expect(lastSortBy).toBe('original_filename');
 
     // APIレスポンスの先頭5件が original_filename 降順（sort_order=desc）に並んでいることを確認
-    // img[alt] ではなくAPIレスポンスを使うためメディア種別（画像/動画）に依存しない
+    // page.request で直接 API を呼び出すことで中間レスポンスの競合を排除する
+    const apiResp = await page.request.get('/api/media?sort_by=original_filename&sort_order=desc&limit=5');
+    const json = await apiResp.json();
+    const firstFilenames: string[] =
+      json.items?.map((i: { original_filename: string }) => i.original_filename) ?? [];
     expect(firstFilenames.length).toBeGreaterThan(1);
     const sorted = [...firstFilenames].sort((a, b) => b.localeCompare(a));
     expect(firstFilenames).toEqual(sorted);
