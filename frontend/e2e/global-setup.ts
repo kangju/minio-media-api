@@ -19,8 +19,8 @@ async function globalSetup() {
   const baseURL = process.env.PW_BASE_URL || 'http://localhost:3000';
   const ctx = await request.newContext({ baseURL });
 
-  // 既存メディアのファイル名一覧を取得（上限100件で判定）
-  const listRes = await ctx.get('/api/media?limit=100');
+  // e2e-seed タグで絞り込んで seed ファイルの存在確認（件数が100超でも安全）
+  const listRes = await ctx.get('/api/media?tag=e2e-seed&limit=10');
   const existingNames = new Set<string>();
   if (listRes.ok()) {
     const data = await listRes.json();
@@ -55,6 +55,7 @@ async function globalSetup() {
     const res = await ctx.post('/api/media', {
       multipart: {
         file: { name, mimeType: 'image/jpeg', buffer: fileBuffer },
+        tags: 'e2e-seed',
       },
     });
     if (res.ok()) seeded++;
