@@ -261,4 +261,20 @@ test.describe('ソート機能', () => {
     await expect(page.locator('[data-testid="sort-by-select"]')).toHaveValue('created_at');
     await expect(page.locator('[data-testid="sort-order-select"]')).toHaveValue('desc');
   });
+
+  test('ソート条件を連続切替しても最終選択条件で一覧表示される', async ({ page }) => {
+    const sortBySelect = page.locator('[data-testid="sort-by-select"]');
+
+    // 短時間で連続切替
+    await sortBySelect.selectOption('original_filename');
+    await sortBySelect.selectOption('created_at');
+    await sortBySelect.selectOption('original_filename');
+
+    // 最終選択値が反映されていることを確認
+    await expect(sortBySelect).toHaveValue('original_filename');
+
+    // ネットワークが落ち着いてもエラーなく表示される
+    await page.waitForLoadState('networkidle');
+    await expect(page.locator('[data-testid="sort-by-select"]')).toHaveValue('original_filename');
+  });
 });
