@@ -104,3 +104,19 @@ describe('Gallery – SELECT モード', () => {
     expect(document.querySelector('[style*="cursor: pointer"]')).toBeTruthy();
   });
 });
+
+describe('Gallery – パフォーマンス最適化', () => {
+  it('リストビューの video は preload="none" を持つ', () => {
+    render(<Gallery {...makeProps({ viewMode: 'list' })} />);
+    const videos = document.querySelectorAll('video');
+    videos.forEach((v) => {
+      expect(v).toHaveAttribute('preload', 'none');
+    });
+  });
+
+  it('リストビューの ListRow は content-visibility: auto スタイルを持つ', () => {
+    render(<Gallery {...makeProps({ viewMode: 'list' })} />);
+    const rows = document.querySelectorAll('[style*="content-visibility"]');
+    expect(rows.length).toBeGreaterThanOrEqual(ITEMS.length);
+  });
+});

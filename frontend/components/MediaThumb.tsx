@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { MediaResponse } from '@/lib/types';
 import { getMediaFileUrl } from '@/lib/api';
 
@@ -13,7 +13,7 @@ interface MediaThumbProps {
   size?: 'large' | 'small';
 }
 
-export default function MediaThumb({
+export default React.memo(function MediaThumb({
   media,
   selected = false,
   selectMode = false,
@@ -49,6 +49,8 @@ export default function MediaThumb({
         cursor: 'pointer',
         transition: 'border-color 0.2s',
         flexShrink: 0,
+        contentVisibility: 'auto',
+        containIntrinsicSize: `0 ${dim}px`,
       }}
     >
       {media.media_type === 'image' ? (
@@ -77,6 +79,7 @@ export default function MediaThumb({
           }}
           muted
           playsInline
+          preload="none"
         />
       )}
 
@@ -156,4 +159,4 @@ export default function MediaThumb({
       )}
     </div>
   );
-}
+});
