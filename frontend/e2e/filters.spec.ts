@@ -265,6 +265,16 @@ test.describe('ソート機能', () => {
   test('ソート条件を連続切替しても最終選択条件で一覧表示される', async ({ page }) => {
     const sortBySelect = page.locator('[data-testid="sort-by-select"]');
 
+    // 最後のメディア一覧 API リクエストの sort_by パラメータを記録する
+    let lastSortBy = '';
+    page.on('request', (req) => {
+      const url = req.url();
+      if (url.includes('/api/media') && !url.match(/\/api\/media\/\d/)) {
+        const m = url.match(/sort_by=([^&]+)/);
+        if (m) lastSortBy = decodeURIComponent(m[1]);
+      }
+    });
+
     // 短時間で連続切替
     await sortBySelect.selectOption('original_filename');
     await sortBySelect.selectOption('created_at');
@@ -273,8 +283,20 @@ test.describe('ソート機能', () => {
     // 最終選択値が反映されていることを確認
     await expect(sortBySelect).toHaveValue('original_filename');
 
-    // ネットワークが落ち着いてもエラーなく表示される
+    // ネットワークが落ち着くまで待機
     await page.waitForLoadState('networkidle');
     await expect(page.locator('[data-testid="sort-by-select"]')).toHaveValue('original_filename');
+
+    // 最後の API リクエストが正しいソート条件（sort_by=original_filename）で発行されていること
+    expect(lastSortBy).toBe('original_filename');
+
+    // 先頭数件の表示ファイル名が original_filename の降順（デフォルト sort_order=desc）に並んでいることを確認
+    const alts = await page.locator('img[alt]').evaluateAll(
+      (els) => els.slice(0, 5).map((el) => el.getAttribute('alt') ?? '')
+    );
+    if (alts.length > 1) {
+      const sorted = [...alts].sort((a, b) => b.localeCompare(a));
+      expect(alts).toEqual(sorted);
+    }
   });
 });
