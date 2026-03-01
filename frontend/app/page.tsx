@@ -71,9 +71,10 @@ export default function Home() {
     } catch (e) {
       if (requestId !== requestIdRef.current) return;
       console.error(e);
+    } finally {
+      loadingRef.current = false;
+      setLoading(false);
     }
-    loadingRef.current = false;
-    setLoading(false);
   }, [activeTags, mediaType, includeDeleted, createdFrom, createdTo, sortBy, sortOrder]);
 
   useEffect(() => {

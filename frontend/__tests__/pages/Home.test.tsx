@@ -258,4 +258,17 @@ describe('Home ページ ポーリング動作 (Issue #5)', () => {
     // マウント時に getTags が呼ばれること
     expect(mockGetTags).toHaveBeenCalledTimes(1);
   });
+
+  it('getMediaList がエラーを返しても finally で loadingRef が解除される', async () => {
+    // fetchMedia の try/catch 外から finally に cleanup を移動したことの回帰テスト
+    // エラー後もローディング状態が残らず、ページがクラッシュしないことを確認
+    mockGetMediaList.mockRejectedValue(new Error('network error'));
+
+    await act(async () => {
+      render(<Home />);
+    });
+
+    // エラー後もローディング表示が残らないこと（finally で setLoading(false) が呼ばれる）
+    expect(screen.queryByText('LOADING...')).not.toBeInTheDocument();
+  });
 });
