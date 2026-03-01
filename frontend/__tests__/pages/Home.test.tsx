@@ -154,7 +154,7 @@ describe('Home ページ ポーリング動作 (Issue #5)', () => {
     expect(mockGetMedia).toHaveBeenCalledWith(1);
   });
 
-  it('done になったアイテムがある場合に fetchTags が呼ばれる', async () => {
+  it('done になったアイテムがある場合に getTags が呼ばれる', async () => {
     mockGetMediaList.mockResolvedValue({
       items: [makeMedia(1, 'running')],
       total: 1,
@@ -228,5 +228,34 @@ describe('Home ページ ポーリング動作 (Issue #5)', () => {
     // pending/running の両バッジが表示されること
     const pendingBadges = screen.getAllByTestId('pending-badge');
     expect(pendingBadges.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('hasMore が fetchMedia(reset=true) 内で true にリセットされる', async () => {
+    // setHasMore(true) を effect 本体から fetchMedia に移動したことの回帰テスト
+    // total > items.length のとき hasMore=true → 「すべて表示済み」は出ない
+    mockGetMediaList.mockResolvedValue({
+      items: [makeMedia(1, 'done'), makeMedia(2, 'done')],
+      total: 100,
+    });
+
+    await act(async () => {
+      render(<Home />);
+    });
+
+    // hasMore=true なので「すべて表示済み」は表示されない
+    expect(screen.queryByText(/すべて表示済み/)).not.toBeInTheDocument();
+  });
+
+  it('マウント時に getTags が呼ばれてタグが取得される', async () => {
+    // fetchTags useCallback 削除後、getTags().then(setTags) パターンの回帰テスト
+    mockGetMediaList.mockResolvedValue({ items: [], total: 0 });
+    mockGetTags.mockResolvedValue([makeTag(1, 'cat'), makeTag(2, 'dog')]);
+
+    await act(async () => {
+      render(<Home />);
+    });
+
+    // マウント時に getTags が呼ばれること
+    expect(mockGetTags).toHaveBeenCalledTimes(1);
   });
 });

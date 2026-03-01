@@ -42,6 +42,7 @@ export default function Home() {
     if (!reset && loadingRef.current) return;
     loadingRef.current = true;
     setLoading(true);
+    if (reset) setHasMore(true);
     const requestId = ++requestIdRef.current;
     try {
       const currentOffset = reset ? 0 : offsetRef.current;
@@ -75,25 +76,15 @@ export default function Home() {
     setLoading(false);
   }, [activeTags, mediaType, includeDeleted, createdFrom, createdTo, sortBy, sortOrder]);
 
-  const fetchTags = useCallback(async () => {
-    try {
-      const data = await getTags();
-      setTags(data);
-    } catch (e) {
-      console.error(e);
-    }
+  useEffect(() => {
+    getTags().then(setTags).catch(console.error);
   }, []);
 
-  // Initial load and when filters change
-  useEffect(() => {
-    offsetRef.current = 0;
-    setHasMore(true);
-    fetchMedia(true);
-  }, [activeTags, mediaType, includeDeleted, createdFrom, createdTo, sortBy, sortOrder, fetchMedia]);
 
   useEffect(() => {
-    fetchTags();
-  }, [fetchTags]);
+    offsetRef.current = 0;
+    fetchMedia(true);
+  }, [activeTags, mediaType, includeDeleted, createdFrom, createdTo, sortBy, sortOrder, fetchMedia]);
 
   // pendingIdsRef: ポーリング関数が常に最新の ID リストにアクセスできるよう useEffect 内で更新
   const pendingIdsRef = useRef<number[]>([]);
@@ -129,7 +120,7 @@ export default function Home() {
           const anyCompleted = updates.some(
             (u) => u.clip_status !== 'pending' && u.clip_status !== 'running'
           );
-          if (anyCompleted) fetchTags();
+          if (anyCompleted) getTags().then(setTags).catch(console.error);
         }
       } catch (e) {
         console.error(e);
@@ -142,7 +133,7 @@ export default function Home() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [hasPending, fetchTags]);
+  }, [hasPending]);
 
   // Infinite scroll
   useEffect(() => {
@@ -188,7 +179,7 @@ export default function Home() {
     setTotal((prev) => prev - idsToDelete.size);
     setSelectedIds(new Set());
     setSelectMode(false);
-    fetchTags();
+    getTags().then(setTags).catch(console.error);
   }
 
   function handleOpen(media: MediaResponse) {
@@ -314,7 +305,7 @@ export default function Home() {
             offsetRef.current = 0;
             setHasMore(true);
             fetchMedia(true);
-            fetchTags();
+            getTags().then(setTags).catch(console.error);
           }}
         />
       )}
