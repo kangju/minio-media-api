@@ -25,20 +25,25 @@ export default function Home() {
   const [includeDeleted, setIncludeDeleted] = useState(false);
   const [createdFrom, setCreatedFrom] = useState('');
   const [createdTo, setCreatedTo] = useState('');
+  const [sortBy, setSortBy] = useState<'created_at' | 'original_filename'>('created_at');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [lightboxMedia, setLightboxMedia] = useState<MediaResponse | null>(null);
   const [showUpload, setShowUpload] = useState(false);
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const offsetRef = useRef(0);
-  const loadingRef = useRef(false);
+  const inflightRef = useRef(0);
+  const requestIdRef = useRef(0);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const filterPanelRef = useRef<HTMLDivElement>(null);
   const LIMIT = 50;
 
   const fetchMedia = useCallback(async (reset = false) => {
-    if (loadingRef.current) return;
-    loadingRef.current = true;
+    if (!reset && inflightRef.current > 0) return;
+    inflightRef.current++;
     setLoading(true);
+    if (reset) setHasMore(true);
+    const requestId = ++requestIdRef.current;
     try {
       const currentOffset = reset ? 0 : offsetRef.current;
       const data = await getMediaList({
@@ -49,7 +54,10 @@ export default function Home() {
         created_to: createdTo || undefined,
         offset: currentOffset,
         limit: LIMIT,
+        sort_by: sortBy,
+        sort_order: sortOrder,
       });
+      if (requestId !== requestIdRef.current) return;
       const newItems = data.items;
       if (reset) {
         setItems(newItems);
@@ -61,38 +69,39 @@ export default function Home() {
       setTotal(data.total);
       setHasMore(currentOffset + newItems.length < data.total);
     } catch (e) {
+      if (requestId !== requestIdRef.current) return;
       console.error(e);
+    } finally {
+      inflightRef.current--;
+      if (inflightRef.current === 0) {
+        setLoading(false);
+      }
     }
-    loadingRef.current = false;
-    setLoading(false);
-  }, [activeTags, mediaType, includeDeleted, createdFrom, createdTo]);
+  }, [activeTags, mediaType, includeDeleted, createdFrom, createdTo, sortBy, sortOrder]);
 
-  const fetchTags = useCallback(async () => {
-    try {
-      const data = await getTags();
-      setTags(data);
-    } catch (e) {
-      console.error(e);
-    }
+  useEffect(() => {
+    getTags().then(setTags).catch(console.error);
   }, []);
 
+
   // Initial load and when filters change
+  // fetchMedia を .then() コールバック経由で呼び、effect 本体からの同期 setState を回避 (react-hooks/set-state-in-effect)
   useEffect(() => {
     offsetRef.current = 0;
-    setHasMore(true);
-    fetchMedia(true);
-  }, [activeTags, mediaType, includeDeleted, createdFrom, createdTo, fetchMedia]);
+    void Promise.resolve().then(() => fetchMedia(true));
+  }, [activeTags, mediaType, includeDeleted, createdFrom, createdTo, sortBy, sortOrder, fetchMedia]);
 
-  useEffect(() => {
-    fetchTags();
-  }, [fetchTags]);
-
-  // pendingIdsRef: レンダー中に同期更新（エフェクト不要、スクロールでタイマーがリセットされない）
+  // pendingIdsRef: ポーリング関数が常に最新の ID リストにアクセスできるよう useEffect 内で更新
   const pendingIdsRef = useRef<number[]>([]);
-  pendingIdsRef.current = items
-    .filter((i) => i.clip_status === 'pending' || i.clip_status === 'running')
-    .map((i) => i.id);
-  const hasPending = pendingIdsRef.current.length > 0;
+  // hasPending はステートから直接算出（レンダー中に ref を書き換えない）
+  const hasPending = items.some(
+    (i) => i.clip_status === 'pending' || i.clip_status === 'running'
+  );
+  useEffect(() => {
+    pendingIdsRef.current = items
+      .filter((i) => i.clip_status === 'pending' || i.clip_status === 'running')
+      .map((i) => i.id);
+  }, [items]);
 
   // Polling: pending/running アイテムのみ個別取得して in-place 更新
   useEffect(() => {
@@ -116,7 +125,7 @@ export default function Home() {
           const anyCompleted = updates.some(
             (u) => u.clip_status !== 'pending' && u.clip_status !== 'running'
           );
-          if (anyCompleted) fetchTags();
+          if (anyCompleted) getTags().then(setTags).catch(console.error);
         }
       } catch (e) {
         console.error(e);
@@ -129,7 +138,7 @@ export default function Home() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [hasPending, fetchTags]);
+  }, [hasPending]);
 
   // Infinite scroll
   useEffect(() => {
@@ -137,7 +146,7 @@ export default function Home() {
     if (!sentinel) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loadingRef.current) {
+        if (entries[0].isIntersecting && hasMore && inflightRef.current === 0) {
           fetchMedia(false);
         }
       },
@@ -175,7 +184,7 @@ export default function Home() {
     setTotal((prev) => prev - idsToDelete.size);
     setSelectedIds(new Set());
     setSelectMode(false);
-    fetchTags();
+    getTags().then(setTags).catch(console.error);
   }
 
   function handleOpen(media: MediaResponse) {
@@ -226,15 +235,21 @@ export default function Home() {
         includeDeleted={includeDeleted}
         createdFrom={createdFrom}
         createdTo={createdTo}
+        sortBy={sortBy}
+        sortOrder={sortOrder}
         onMediaTypeChange={setMediaType}
         onIncludeDeletedChange={setIncludeDeleted}
         onCreatedFromChange={setCreatedFrom}
         onCreatedToChange={setCreatedTo}
+        onSortByChange={setSortBy}
+        onSortOrderChange={setSortOrder}
         onReset={() => {
           setMediaType('');
           setIncludeDeleted(false);
           setCreatedFrom('');
           setCreatedTo('');
+          setSortBy('created_at');
+          setSortOrder('desc');
         }}
       />
       </div>
@@ -295,7 +310,7 @@ export default function Home() {
             offsetRef.current = 0;
             setHasMore(true);
             fetchMedia(true);
-            fetchTags();
+            getTags().then(setTags).catch(console.error);
           }}
         />
       )}

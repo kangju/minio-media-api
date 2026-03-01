@@ -381,6 +381,271 @@ class TestGetMediaList:
         assert r.json()["items"] == []
 
 
+class TestListMediaPagination:
+    """GET /media の limit / offset パラメータバリデーションテスト。"""
+
+    # ------------------------------------------------------------------ limit
+    def test_limit_negative_returns_422(self, client):
+        """limit に負の値を渡すと 422 になる（下限バリデーション）。"""
+        r = client.get("/media?limit=-1")
+        assert r.status_code == 422
+
+    def test_limit_zero_returns_422(self, client):
+        """limit=0 は 422 になる（ge=1 バリデーション）。"""
+        r = client.get("/media?limit=0")
+        assert r.status_code == 422
+
+    def test_limit_string_returns_422(self, client):
+        """limit に文字列を渡すと 422 になる（型バリデーション）。"""
+        r = client.get("/media?limit=abc")
+        assert r.status_code == 422
+
+    def test_limit_one_returns_200(self, client):
+        """limit=1 は正常で、items が 1 件以下になる。"""
+        r = client.get("/media?limit=1")
+        assert r.status_code == 200
+        data = r.json()
+        assert len(data["items"]) <= 1
+
+    def test_limit_default_is_applied(self, client):
+        """limit 省略時はデフォルト値（30）が適用される。"""
+        r = client.get("/media")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["limit"] == 30
+
+    def test_limit_large_is_capped(self, client):
+        """limit=999 はエラーにならず max_limit（100）でキャップされる。"""
+        r = client.get("/media?limit=999")
+        assert r.status_code == 200
+        data = r.json()
+        assert len(data["items"]) <= 100
+
+    # ------------------------------------------------------------------ offset
+    def test_offset_negative_returns_422(self, client):
+        """offset に負の値を渡すと 422 になる（既存の ge=0 バリデーション確認）。"""
+        r = client.get("/media?offset=-1")
+        assert r.status_code == 422
+
+    def test_offset_string_returns_422(self, client):
+        """offset に文字列を渡すと 422 になる（型バリデーション）。"""
+        r = client.get("/media?offset=xyz")
+        assert r.status_code == 422
+
+    def test_offset_large_returns_empty(self, client):
+        """offset が総件数を超える場合は 200 で空リストになる。"""
+        r = client.get("/media?offset=9999")
+        assert r.status_code == 200
+        assert r.json()["items"] == []
+
+    # ------------------------------------------------------------------ 組み合わせ
+    def test_limit_negative_offset_valid_returns_422(self, client):
+        """limit が異常でも 422 になる（offset が正常でも）。"""
+        r = client.get("/media?limit=-1&offset=0")
+        assert r.status_code == 422
+
+
+class TestSortMedia:
+    """GET /media のソートパラメータテスト。"""
+
+    @pytest.fixture(autouse=True)
+    def setup_media(self, client):
+        """ソートテスト用にファイル名・作成順が異なるメディアを作成する。"""
+        self.media_b = client.post(
+            "/media",
+            files=[make_upload_file(MINIMAL_JPEG, "beta.jpg", "image/jpeg")],
+        ).json()
+        self.media_a = client.post(
+            "/media",
+            files=[make_upload_file(MINIMAL_JPEG_2, "alpha.jpg", "image/jpeg")],
+        ).json()
+
+    def test_default_sort_created_at_desc(self, client):
+        """デフォルト（パラメータなし）で created_at 降順になる。"""
+        r = client.get("/media")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) >= 2
+        # 最後に作成したものが先頭（降順）
+        ids = [i["id"] for i in items]
+        assert ids.index(self.media_a["id"]) < ids.index(self.media_b["id"])
+
+    def test_sort_created_at_asc(self, client):
+        """sort_by=created_at&sort_order=asc で昇順になる。"""
+        r = client.get("/media?sort_by=created_at&sort_order=asc")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) >= 2
+        # 最初に作成したものが先頭（昇順）
+        ids = [i["id"] for i in items]
+        assert ids.index(self.media_b["id"]) < ids.index(self.media_a["id"])
+
+    def test_sort_filename_asc(self, client):
+        """sort_by=original_filename&sort_order=asc でファイル名昇順になる。"""
+        r = client.get("/media?sort_by=original_filename&sort_order=asc")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) >= 2
+        filenames = [i["original_filename"] for i in items]
+        # alpha.jpg が beta.jpg より前
+        assert filenames.index("alpha.jpg") < filenames.index("beta.jpg")
+
+    def test_sort_filename_desc(self, client):
+        """sort_by=original_filename&sort_order=desc でファイル名降順になる。"""
+        r = client.get("/media?sort_by=original_filename&sort_order=desc")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) >= 2
+        filenames = [i["original_filename"] for i in items]
+        # beta.jpg が alpha.jpg より前
+        assert filenames.index("beta.jpg") < filenames.index("alpha.jpg")
+
+    def test_invalid_sort_by_422(self, client):
+        """不正な sort_by は 422 を返す。"""
+        r = client.get("/media?sort_by=unknown_field")
+        assert r.status_code == 422
+
+    def test_invalid_sort_order_422(self, client):
+        """不正な sort_order は 422 を返す。"""
+        r = client.get("/media?sort_order=random")
+        assert r.status_code == 422
+
+
+class TestSortCrudValidation:
+    """crud.get_media_list のソートバリデーションテスト。
+
+    router の Literal バリデーション到達前に crud が直接呼ばれた場合でも
+    不正値に対して ValueError を発生させることを確認する。
+    """
+
+    def test_invalid_sort_by_raises_value_error(self, db_engine):
+        """不正な sort_by は ValueError を発生させる。"""
+        import crud
+        from database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            with pytest.raises(ValueError, match="sort_by"):
+                crud.get_media_list(
+                    db,
+                    tag=[],
+                    media_type=None,
+                    include_deleted=False,
+                    created_from=None,
+                    created_to=None,
+                    offset=0,
+                    limit=10,
+                    sort_by="unknown_field",
+                    sort_order="desc",
+                )
+        finally:
+            db.close()
+
+    def test_invalid_sort_order_raises_value_error(self, db_engine):
+        """不正な sort_order は ValueError を発生させる。"""
+        import crud
+        from database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            with pytest.raises(ValueError, match="sort_order"):
+                crud.get_media_list(
+                    db,
+                    tag=[],
+                    media_type=None,
+                    include_deleted=False,
+                    created_from=None,
+                    created_to=None,
+                    offset=0,
+                    limit=10,
+                    sort_by="created_at",
+                    sort_order="random",
+                )
+        finally:
+            db.close()
+
+
+class TestSortWithManyMedia:
+    """150枚の大量データでのソート・ページネーション・フィルタテスト。
+
+    many_media フィクスチャで 150 枚を投入し、大量データ環境での動作を検証する。
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup(self, many_media):
+        """150枚の画像を投入するセットアップ。"""
+
+    def test_filename_asc_first_item(self, client):
+        """ファイル名昇順で file_001.jpg が先頭になる。"""
+        r = client.get("/media?sort_by=original_filename&sort_order=asc&limit=1")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total"] == 150
+        assert data["items"][0]["original_filename"] == "file_001.jpg"
+
+    def test_filename_desc_first_item(self, client):
+        """ファイル名降順で file_150.jpg が先頭になる。"""
+        r = client.get("/media?sort_by=original_filename&sort_order=desc&limit=1")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total"] == 150
+        assert data["items"][0]["original_filename"] == "file_150.jpg"
+
+    def test_created_at_asc_first_item(self, client):
+        """作成日時昇順で最初にアップロードした file_001.jpg が先頭になる。"""
+        r = client.get("/media?sort_by=created_at&sort_order=asc&limit=1")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total"] == 150
+        assert data["items"][0]["original_filename"] == "file_001.jpg"
+
+    def test_created_at_desc_first_item(self, client):
+        """作成日時降順で最後にアップロードした file_150.jpg が先頭になる。"""
+        r = client.get("/media?sort_by=created_at&sort_order=desc&limit=1")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total"] == 150
+        assert data["items"][0]["original_filename"] == "file_150.jpg"
+
+    def test_pagination_returns_50_items(self, client):
+        """デフォルトのページサイズ（50件）で正しく返る。"""
+        r = client.get("/media?limit=50&offset=0")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total"] == 150
+        assert len(data["items"]) == 50
+
+    def test_tag_filter_with_many_items(self, client):
+        """150枚の中でタグ付き画像のみフィルタリングできる。"""
+        # タグ付き画像を1枚追加アップロード
+        r_up = client.post(
+            "/media",
+            files=[make_upload_file(MINIMAL_JPEG_2, "tagged.jpg", "image/jpeg")],
+            data={"tags": ["bulk_test_tag"]},
+        )
+        assert r_up.status_code == 201
+        tagged_id = r_up.json()["id"]
+
+        r = client.get("/media?tag=bulk_test_tag")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total"] == 1
+        assert data["items"][0]["id"] == tagged_id
+
+    def test_pagination_covers_all_items_without_duplicates(self, client):
+        """3ページ合計で150件が重複なく揃う（タイブレーカー動作確認）。"""
+        page1 = client.get("/media?sort_by=created_at&sort_order=desc&limit=50&offset=0").json()
+        page2 = client.get("/media?sort_by=created_at&sort_order=desc&limit=50&offset=50").json()
+        page3 = client.get("/media?sort_by=created_at&sort_order=desc&limit=50&offset=100").json()
+        all_ids = (
+            [i["id"] for i in page1["items"]]
+            + [i["id"] for i in page2["items"]]
+            + [i["id"] for i in page3["items"]]
+        )
+        assert len(all_ids) == 150
+        assert len(set(all_ids)) == 150  # 重複なし（タイブレーカー有効）
+
+
 class TestGetMediaById:
     """GET /media/{id} エンドポイントのテスト。"""
 
@@ -460,6 +725,28 @@ class TestGetMediaFile:
         client.delete(f"/media/{self.media_id}")
         r = client.get(f"/media/{self.media_id}/file")
         assert r.status_code == 404
+
+
+class TestGetMediaFileMissingKey:
+    """GET /media/{id}/file で minio_key=None のレコードが 409 を返すテスト。"""
+
+    def test_missing_minio_key_returns_409(self, client, db_engine):
+        """minio_key が None のメディアに対してファイル取得は 409 になる。"""
+        from sqlalchemy import text
+
+        # minio_key=None のレコードを直接 DB に挿入（アップロード失敗時と同じ状態）
+        with db_engine.connect() as conn:
+            result = conn.execute(
+                text(
+                    "INSERT INTO media (original_filename, minio_key, file_hash, media_type, clip_status)"
+                    " VALUES ('error.jpg', NULL, 'errorhash001', 'image', 'error') RETURNING id"
+                )
+            )
+            media_id = result.scalar_one()
+            conn.commit()
+
+        r = client.get(f"/media/{media_id}/file")
+        assert r.status_code == 409
 
 
 class TestDeleteMedia:
@@ -811,3 +1098,25 @@ class TestRunningResetOnStartup:
             )
         finally:
             db.close()
+
+
+class TestAnalyzeMediaMissingKey:
+    """POST /media/{id}/analyze で minio_key=None のレコードが 409 を返すテスト。"""
+
+    def test_analyze_missing_minio_key_returns_409(self, client, db_engine):
+        """minio_key が None のメディアに対して analyze は 409 になる。"""
+        from sqlalchemy import text
+
+        # minio_key=None のレコードを直接 DB に挿入（アップロード失敗時と同じ状態）
+        with db_engine.connect() as conn:
+            result = conn.execute(
+                text(
+                    "INSERT INTO media (original_filename, minio_key, file_hash, media_type, clip_status)"
+                    " VALUES ('error.jpg', NULL, 'errorhash002', 'image', 'error') RETURNING id"
+                )
+            )
+            media_id = result.scalar_one()
+            conn.commit()
+
+        r = client.post(f"/media/{media_id}/analyze")
+        assert r.status_code == 409

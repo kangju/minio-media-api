@@ -27,8 +27,14 @@ jest.mock('@/lib/api', () => ({
 }));
 
 // IntersectionObserver をスタブ化（jsdom に存在しない）
+// コールバックを外部からトリガーできるよう最後のインスタンスを記録する
+let lastIntersectionCallback: ((entries: { isIntersecting: boolean }[]) => void) | null = null;
+
 beforeAll(() => {
   global.IntersectionObserver = class {
+    constructor(cb: (entries: { isIntersecting: boolean }[]) => void) {
+      lastIntersectionCallback = cb;
+    }
     observe = jest.fn();
     disconnect = jest.fn();
     unobserve = jest.fn();
@@ -154,7 +160,7 @@ describe('Home ページ ポーリング動作 (Issue #5)', () => {
     expect(mockGetMedia).toHaveBeenCalledWith(1);
   });
 
-  it('done になったアイテムがある場合に fetchTags が呼ばれる', async () => {
+  it('done になったアイテムがある場合に getTags が呼ばれる', async () => {
     mockGetMediaList.mockResolvedValue({
       items: [makeMedia(1, 'running')],
       total: 1,
@@ -207,4 +213,101 @@ describe('Home ページ ポーリング動作 (Issue #5)', () => {
     // file2.jpg はまだ表示されていること（クラッシュしていない）
     expect(screen.getByText('file2.jpg')).toBeInTheDocument();
   });
-});
+
+  it('pending/running アイテムを含む一覧をレンダーしても React エラーが発生しない', async () => {
+    // pendingIdsRef をレンダー中に書き換えないことの回帰テスト
+    mockGetMediaList.mockResolvedValue({
+      items: [
+        makeMedia(1, 'pending'),
+        makeMedia(2, 'running'),
+        makeMedia(3, 'done'),
+      ],
+      total: 3,
+    });
+    mockGetMedia.mockResolvedValue(makeMedia(1, 'done'));
+
+    // エラーなくレンダーできること
+    await act(async () => {
+      render(<Home />);
+    });
+
+    // pending/running の両バッジが表示されること
+    const pendingBadges = screen.getAllByTestId('pending-badge');
+    expect(pendingBadges.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('hasMore が fetchMedia(reset=true) 内で true にリセットされる', async () => {
+    // setHasMore(true) を effect 本体から fetchMedia に移動したことの回帰テスト
+    // total > items.length のとき hasMore=true → 「すべて表示済み」は出ない
+    mockGetMediaList.mockResolvedValue({
+      items: [makeMedia(1, 'done'), makeMedia(2, 'done')],
+      total: 100,
+    });
+
+    await act(async () => {
+      render(<Home />);
+    });
+
+    // hasMore=true なので「すべて表示済み」は表示されない
+    expect(screen.queryByText(/すべて表示済み/)).not.toBeInTheDocument();
+  });
+
+  it('マウント時に getTags が呼ばれてタグが取得される', async () => {
+    // fetchTags useCallback 削除後、getTags().then(setTags) パターンの回帰テスト
+    mockGetMediaList.mockResolvedValue({ items: [], total: 0 });
+    mockGetTags.mockResolvedValue([makeTag(1, 'cat'), makeTag(2, 'dog')]);
+
+    await act(async () => {
+      render(<Home />);
+    });
+
+    // マウント時に getTags が呼ばれること
+    expect(mockGetTags).toHaveBeenCalledTimes(1);
+  });
+
+  it('getMediaList がエラーを返しても finally で loadingRef が解除される', async () => {
+    // fetchMedia の try/catch 外から finally に cleanup を移動したことの回帰テスト
+    // エラー後もローディング状態が残らず、ページがクラッシュしないことを確認
+    mockGetMediaList.mockRejectedValue(new Error('network error'));
+
+    await act(async () => {
+      render(<Home />);
+    });
+
+    // エラー後もローディング表示が残らないこと（finally で setLoading(false) が呼ばれる）
+    expect(screen.queryByText('LOADING...')).not.toBeInTheDocument();
+  });
+
+  it('フィルタfetch中にスクロールfetchがブロックされる (inflightRef)', async () => {
+    // inflightRef カウンタ方式の回帰テスト:
+    // reset=true（フィルタfetch）実行中にreset=false（スクロールfetch）が呼ばれても
+    // inflightRef.current > 0 でガードされること
+    let resolveFirst!: (v: unknown) => void;
+    const firstFetch = new Promise((r) => { resolveFirst = r; });
+    mockGetMediaList
+      .mockReturnValueOnce(firstFetch)                             // 1st fetch (reset=true, 保留)
+      .mockResolvedValue({ items: [makeMedia(5, 'done')], total: 1 }); // 2nd fetch
+
+    await act(async () => {
+      render(<Home />);
+    });
+
+    // 1st fetch（reset=true）は進行中、callsは1回
+    expect(mockGetMediaList).toHaveBeenCalledTimes(1);
+
+    // IntersectionObserver コールバックを直接トリガーしてスクロールfetchを試みる
+    // inflightRef.current > 0 なのでブロックされるはず
+    if (lastIntersectionCallback) {
+      act(() => { lastIntersectionCallback!([{ isIntersecting: true }]); });
+    }
+
+    // スクロールfetch は inflightRef ガードで弾かれるので呼び出し回数は変わらない
+    expect(mockGetMediaList).toHaveBeenCalledTimes(1);
+
+    // 1st fetch を解決してカウンタを 0 に戻す
+    await act(async () => {
+      resolveFirst({ items: [makeMedia(1, 'done')], total: 1 });
+      await Promise.resolve();
+    });
+  });
+})

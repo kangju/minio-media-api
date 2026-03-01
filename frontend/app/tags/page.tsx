@@ -26,7 +26,7 @@ export default function TagsPage() {
   }, []);
 
   useEffect(() => {
-    fetchTags();
+    void Promise.resolve().then(() => fetchTags());
   }, [fetchTags]);
 
   async function handleAdd() {

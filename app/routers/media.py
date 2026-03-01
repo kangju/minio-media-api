@@ -9,7 +9,7 @@ import io
 import logging
 import os
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
@@ -190,7 +190,9 @@ def list_media(
     created_from: Optional[datetime] = Query(default=None),
     created_to: Optional[datetime] = Query(default=None),
     offset: int = Query(default=0, ge=0),
-    limit: Optional[int] = Query(default=None),
+    limit: Optional[int] = Query(default=None, ge=1),
+    sort_by: Literal["created_at", "original_filename"] = Query(default="created_at"),
+    sort_order: Literal["asc", "desc"] = Query(default="desc"),
     db: Session = Depends(get_db),
 ) -> MediaListResponse:
     """メディア一覧を取得する。
@@ -206,6 +208,8 @@ def list_media(
         created_to: 作成日時の上限。
         offset: 取得開始位置。
         limit: 取得件数。
+        sort_by: ソートフィールド（created_at または original_filename）。
+        sort_order: ソート順（asc または desc）。
         db: データベースセッション。
 
     Returns:
@@ -224,6 +228,8 @@ def list_media(
         created_to=created_to,
         offset=offset,
         limit=limit,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
     return MediaListResponse(
         items=[_build_media_response(m) for m in items],
@@ -255,8 +261,14 @@ def get_media_file(
     media = crud.get_media_by_id(db, media_id)
     if media is None:
         raise HTTPException(status_code=404, detail="メディアが見つかりません。")
+    if media.minio_key is None:
+        raise HTTPException(status_code=409, detail="このメディアはファイルが存在しません。")
     data, content_type = minio.get_file(media.minio_key)
-    return StreamingResponse(io.BytesIO(data), media_type=content_type)
+    headers = {
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "ETag": f'"{media.file_hash}"',
+    }
+    return StreamingResponse(io.BytesIO(data), media_type=content_type, headers=headers)
 
 
 @router.delete("/{media_id}", status_code=204)
@@ -303,6 +315,8 @@ def analyze_media(
         raise HTTPException(
             status_code=403, detail="動画ファイルは CLIP 解析に対応していません。"
         )
+    if media.minio_key is None:
+        raise HTTPException(status_code=409, detail="このメディアはファイルが存在しません。")
 
     data, _ = minio.get_file(media.minio_key)
     all_tags = crud.get_all_tags(db)
