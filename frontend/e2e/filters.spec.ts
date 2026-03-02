@@ -39,14 +39,17 @@ test.describe('メディアタイプフィルタ', () => {
 
   test('「画像」を選択すると画像のみ表示される', async ({ page }) => {
     const select = page.locator('[data-testid="media-type-select"]');
-    const beforeCount = await page.locator('img').count();
+
+    const imageRequestPromise = page.waitForRequest((req) =>
+      req.url().includes('/api/media') &&
+      req.url().includes('media_type=image') &&
+      !req.url().match(/\/api\/media\/\d+/)
+    );
 
     await select.selectOption('image');
-    await page.waitForTimeout(1000);
-
-    const afterCount = await page.locator('img').count();
-    expect(afterCount).toBeGreaterThanOrEqual(0);
-    expect(afterCount).toBeLessThanOrEqual(beforeCount);
+    const req = await imageRequestPromise;
+    expect(req.url()).toContain('media_type=image');
+    await expect(select).toHaveValue('image');
   });
 
   test('「動画」を選択するとアイテム数が変わる', async ({ page }) => {
@@ -164,16 +167,19 @@ test.describe('タグフィルタポップアップ', () => {
 
   test('タグがあればポップアップボタンが表示される', async ({ page }) => {
     const filterBtn = page.locator('[data-testid="tag-filter-btn"]');
-    // タグなしDBでは表示されない場合もOK
-    const hasBtn = await filterBtn.count();
-    if (hasBtn > 0) {
-      await expect(filterBtn).toBeVisible();
+    if (await filterBtn.count() === 0) {
+      test.skip(true, 'タグフィルターボタンが存在しないためスキップ（seedでタグが存在することを前提とすべき）');
+      return;
     }
+    await expect(filterBtn).toBeVisible();
   });
 
   test('ポップアップが開閉できる（タグがあれば）', async ({ page }) => {
     const filterBtn = page.locator('[data-testid="tag-filter-btn"]');
-    if (await filterBtn.count() === 0) return;
+    if (await filterBtn.count() === 0) {
+      test.skip(true, 'タグフィルターボタンが存在しないためスキップ（seedでタグが存在することを前提とすべき）');
+      return;
+    }
 
     await filterBtn.click();
     await expect(page.locator('[data-testid="tag-filter-popup"]')).toBeVisible();
@@ -186,32 +192,44 @@ test.describe('タグフィルタポップアップ', () => {
 
   test('タグを選択するとボタンに選択数が表示される（タグがあれば）', async ({ page }) => {
     const filterBtn = page.locator('[data-testid="tag-filter-btn"]');
-    if (await filterBtn.count() === 0) return;
+    if (await filterBtn.count() === 0) {
+      test.skip(true, 'タグフィルターボタンが存在しないためスキップ（seedでタグが存在することを前提とすべき）');
+      return;
+    }
 
     await filterBtn.click();
     const firstOption = page.locator('[data-testid^="tag-option-"]').first();
-    if (await firstOption.count() > 0) {
-      await firstOption.locator('input[type="checkbox"]').check();
-      await expect(filterBtn).toContainText('(1)');
+    if (await firstOption.count() === 0) {
+      test.skip(true, 'タグオプションが存在しないためスキップ（seedでタグが存在することを前提とすべき）');
+      return;
     }
+    await firstOption.locator('input[type="checkbox"]').check();
+    await expect(filterBtn).toContainText('(1)');
   });
 
   test('クリアボタンでタグ選択が解除される（タグがあれば）', async ({ page }) => {
     const filterBtn = page.locator('[data-testid="tag-filter-btn"]');
-    if (await filterBtn.count() === 0) return;
+    if (await filterBtn.count() === 0) {
+      test.skip(true, 'タグフィルターボタンが存在しないためスキップ（seedでタグが存在することを前提とすべき）');
+      return;
+    }
 
     // タグを選択してからクリア
     await filterBtn.click();
     const firstOption = page.locator('[data-testid^="tag-option-"]').first();
-    if (await firstOption.count() > 0) {
-      await firstOption.locator('input[type="checkbox"]').check();
-      await page.mouse.click(10, 10); // close popup
-      const clearBtn = page.locator('[data-testid="tag-filter-clear-btn"]');
-      if (await clearBtn.count() > 0) {
-        await clearBtn.click();
-        await expect(filterBtn).not.toContainText('(');
-      }
+    if (await firstOption.count() === 0) {
+      test.skip(true, 'タグオプションが存在しないためスキップ（seedでタグが存在することを前提とすべき）');
+      return;
     }
+    await firstOption.locator('input[type="checkbox"]').check();
+    await page.mouse.click(10, 10); // close popup
+    const clearBtn = page.locator('[data-testid="tag-filter-clear-btn"]');
+    if (await clearBtn.count() === 0) {
+      test.skip(true, 'タグフィルタークリアボタンが存在しないためスキップ');
+      return;
+    }
+    await clearBtn.click();
+    await expect(filterBtn).not.toContainText('(');
   });
 });
 
