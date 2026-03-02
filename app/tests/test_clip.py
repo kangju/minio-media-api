@@ -189,6 +189,8 @@ class TestClipEndpoint:
             data={"candidates": json.dumps(["cat", 123, None])},
         )
         assert r.status_code == 422
+
+
 class TestClipServiceUnit:
     """CLIP サービス単体のユニットテスト。
 
