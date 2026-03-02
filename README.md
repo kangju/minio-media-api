@@ -144,14 +144,28 @@ curl -X POST http://localhost:8000/clip/analyze \
 
 ## テストの実行
 
-```bash
-# コンテナ内でテストを実行
-docker compose exec api pytest app/tests/ -v
+### pytest（バックエンド単体テスト）
 
-# ローカルで実行する場合（SQLite を使用）
-cd app
-pip install -r requirements.txt
-pytest tests/ -v
+1. テスト用環境変数ファイルを作成する:
+
+```bash
+cp .env.test.example .env.test
+# .env.test を編集して各変数に値を設定する
+```
+
+2. テストを実行する:
+
+```bash
+docker compose --env-file .env.test -f docker-compose.test.yml run --rm api-test
+docker compose --env-file .env.test -f docker-compose.test.yml down -v
+```
+
+### E2E テスト（Playwright）
+
+```bash
+docker compose --env-file .env.test -f docker-compose.test.yml up -d --build api-server-test frontend-e2e clip-worker-e2e
+cd frontend && PW_BASE_URL=http://localhost:3001 npx playwright test
+docker compose --env-file .env.test -f docker-compose.test.yml down -v
 ```
 
 ## アーキテクチャ
