@@ -3,6 +3,8 @@
 実際の Docker CLIP サービスを使用してテストを行う（モックなし）。
 """
 
+import json
+
 import pytest
 
 from tests.conftest import MINIMAL_JPEG, MINIMAL_MP4, make_upload_file
@@ -117,7 +119,6 @@ class TestClipEndpoint:
 
     def test_analyze_with_candidates_json(self, client):
         """ケース10: candidates JSON を指定すると指定タグのみで解析される。"""
-        import json
         candidate_tags = ["cat", "dog", "animal"]
         r = client.post(
             "/clip/analyze",
@@ -140,7 +141,6 @@ class TestClipEndpoint:
 
     def test_analyze_with_non_array_json_candidates_422(self, client):
         """ケース12: JSON 配列以外（オブジェクト）を candidates に指定すると 422 になる。"""
-        import json
         r = client.post(
             "/clip/analyze",
             files=[make_upload_file(MINIMAL_JPEG, "test.jpg", "image/jpeg")],
@@ -150,7 +150,6 @@ class TestClipEndpoint:
 
     def test_analyze_with_empty_candidates(self, client):
         """ケース13: 空配列を candidates に指定すると結果は空リストになる。"""
-        import json
         r = client.post(
             "/clip/analyze",
             files=[make_upload_file(MINIMAL_JPEG, "test.jpg", "image/jpeg")],
@@ -165,15 +164,27 @@ class TestClipEndpoint:
         client.post("/tags", json={"name": "landscape"})
         client.post("/tags", json={"name": "portrait"})
 
+        # DB の全タグ名を取得
+        tags_res = client.get("/tags")
+        db_tag_names = {t["name"] for t in tags_res.json()}
+
         r = client.post(
             "/clip/analyze",
             files=[make_upload_file(MINIMAL_JPEG, "test.jpg", "image/jpeg")],
         )
         assert r.status_code == 200
-        data = r.json()
-        assert "tags" in data
-        # DB タグが候補に含まれるため、結果は通常通り返る（空でない場合が多い）
-        assert isinstance(data["tags"], list)
+        returned_names = {tag["name"] for tag in r.json()["tags"]}
+        # 返却タグはすべて DB 登録済みタグの範囲内に収まること
+        assert returned_names.issubset(db_tag_names)
+
+    def test_analyze_with_non_string_elements_422(self, client):
+        """ケース15: candidates に文字列以外の要素が含まれると 422 になる。"""
+        r = client.post(
+            "/clip/analyze",
+            files=[make_upload_file(MINIMAL_JPEG, "test.jpg", "image/jpeg")],
+            data={"candidates": json.dumps(["cat", 123, None])},
+        )
+        assert r.status_code == 422
 
 
 
