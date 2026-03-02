@@ -58,9 +58,11 @@ async def analyze_clip(
     if candidates is not None:
         try:
             parsed = json.loads(candidates)
-        except (json.JSONDecodeError, ValueError):
-            parsed = None
-
+        except json.JSONDecodeError:
+            raise HTTPException(
+                status_code=422,
+                detail=[{"loc": ["body", "candidates"], "msg": "有効な JSON を指定してください。", "type": "value_error"}],
+            )
         if not isinstance(parsed, list):
             raise HTTPException(
                 status_code=422,
@@ -71,7 +73,7 @@ async def analyze_clip(
                 status_code=422,
                 detail=[{"loc": ["body", "candidates"], "msg": "candidates の各要素は文字列である必要があります。", "type": "value_error"}],
             )
-        candidate_names = [t.strip() for t in parsed if t.strip()]
+        candidate_names = list({t.strip() for t in parsed if t.strip()})
     else:
         all_tags = crud.get_all_tags(db)
         candidate_names = list({t["name"] for t in all_tags})

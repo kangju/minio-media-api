@@ -159,7 +159,11 @@ class TestClipEndpoint:
         assert r.json()["tags"] == []
 
     def test_analyze_without_candidates_uses_db_tags(self, client):
-        """ケース14: candidates 未指定の場合は DB 全タグを候補として解析する（後方互換）。"""
+        """ケース14: candidates 未指定の場合は DB 全タグを候補として解析する（後方互換）。
+
+        conftest の autouse ``clean_db`` フィクスチャがテストごとに DB をリセットするため、
+        他テストで登録したタグが混入することはなく、テスト独立性は保証される。
+        """
         # DB にタグを作成しておく
         client.post("/tags", json={"name": "landscape"})
         client.post("/tags", json={"name": "portrait"})
@@ -185,9 +189,6 @@ class TestClipEndpoint:
             data={"candidates": json.dumps(["cat", 123, None])},
         )
         assert r.status_code == 422
-
-
-
 class TestClipServiceUnit:
     """CLIP サービス単体のユニットテスト。
 
