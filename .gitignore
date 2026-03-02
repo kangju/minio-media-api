@@ -1,5 +1,6 @@
 # 環境変数（秘密情報を含むため除外）
 .env
+.env.test
 
 # Python
 __pycache__/

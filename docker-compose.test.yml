@@ -3,15 +3,15 @@ version: "3.9"
 # 隔離テスト環境
 # 本番コンテナ（docker-compose.yml）とは別ポートで起動し、テスト後にボリュームを削除する。
 #
-# 使い方:
+# 使い方（要: .env.test ファイルを用意すること。cp .env.test.example .env.test）:
 #   Pytest のみ:
-#     docker compose -f docker-compose.test.yml run --rm api-test
-#     docker compose -f docker-compose.test.yml down -v
+#     docker compose --env-file .env.test -f docker-compose.test.yml run --rm api-test
+#     docker compose --env-file .env.test -f docker-compose.test.yml down -v
 #
 #   E2E のみ（Pytest 後に実施、別ボリューム使用）:
-#     docker compose -f docker-compose.test.yml up -d --build api-server-test frontend-e2e clip-worker-e2e
+#     docker compose --env-file .env.test -f docker-compose.test.yml up -d --build api-server-test frontend-e2e clip-worker-e2e
 #     cd frontend && PW_BASE_URL=http://localhost:3001 npx playwright test
-#     docker compose -f docker-compose.test.yml down -v
+#     docker compose --env-file .env.test -f docker-compose.test.yml down -v
 
 services:
   # ─── Pytest 用インフラ ─────────────────────────────────────────────
@@ -20,14 +20,14 @@ services:
     ports:
       - "5433:5432"
     environment:
-      POSTGRES_USER: testuser
-      POSTGRES_PASSWORD: testpassword
-      POSTGRES_DB: testdb
+      POSTGRES_USER: ${TEST_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${TEST_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${TEST_POSTGRES_DB}
     volumes:
       - postgres_test_data:/var/lib/postgresql/data
       - ./docker/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U testuser -d testdb"]
+      test: ["CMD-SHELL", "pg_isready -U $${TEST_POSTGRES_USER} -d $${TEST_POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -39,8 +39,8 @@ services:
       - "9002:9000"
       - "9003:9001"
     environment:
-      MINIO_ROOT_USER: testminio
-      MINIO_ROOT_PASSWORD: testminio123
+      MINIO_ROOT_USER: ${TEST_MINIO_USER}
+      MINIO_ROOT_PASSWORD: ${TEST_MINIO_PASSWORD}
     command: server /data --console-address ":9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
@@ -58,12 +58,12 @@ services:
       minio-test:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://testuser:testpassword@postgres-test:5432/testdb
+      DATABASE_URL: postgresql://${TEST_POSTGRES_USER}:${TEST_POSTGRES_PASSWORD}@postgres-test:5432/${TEST_POSTGRES_DB}
       MINIO_ENDPOINT: minio-test
       MINIO_PORT: "9000"
       MINIO_USE_SSL: "false"
-      MINIO_ACCESS_KEY: testminio
-      MINIO_SECRET_KEY: testminio123
+      MINIO_ACCESS_KEY: ${TEST_MINIO_USER}
+      MINIO_SECRET_KEY: ${TEST_MINIO_PASSWORD}
       MINIO_BUCKET: media
       CLIP_MODEL_NAME: ViT-B-32
       CLIP_PRETRAINED: openai
@@ -88,14 +88,14 @@ services:
     ports:
       - "5434:5432"
     environment:
-      POSTGRES_USER: e2euser
-      POSTGRES_PASSWORD: e2epassword
-      POSTGRES_DB: e2edb
+      POSTGRES_USER: ${E2E_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${E2E_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${E2E_POSTGRES_DB}
     volumes:
       - postgres_e2e_data:/var/lib/postgresql/data
       - ./docker/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U e2euser -d e2edb"]
+      test: ["CMD-SHELL", "pg_isready -U $${E2E_POSTGRES_USER} -d $${E2E_POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -107,8 +107,8 @@ services:
       - "9004:9000"
       - "9005:9001"
     environment:
-      MINIO_ROOT_USER: e2eminio
-      MINIO_ROOT_PASSWORD: e2eminio123
+      MINIO_ROOT_USER: ${E2E_MINIO_USER}
+      MINIO_ROOT_PASSWORD: ${E2E_MINIO_PASSWORD}
     command: server /data --console-address ":9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
@@ -128,12 +128,12 @@ services:
       minio-e2e:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://e2euser:e2epassword@postgres-e2e:5432/e2edb
+      DATABASE_URL: postgresql://${E2E_POSTGRES_USER}:${E2E_POSTGRES_PASSWORD}@postgres-e2e:5432/${E2E_POSTGRES_DB}
       MINIO_ENDPOINT: minio-e2e
       MINIO_PORT: "9000"
       MINIO_USE_SSL: "false"
-      MINIO_ACCESS_KEY: e2eminio
-      MINIO_SECRET_KEY: e2eminio123
+      MINIO_ACCESS_KEY: ${E2E_MINIO_USER}
+      MINIO_SECRET_KEY: ${E2E_MINIO_PASSWORD}
       MINIO_BUCKET: media
       CLIP_MODEL_NAME: ViT-B-32
       CLIP_PRETRAINED: openai
@@ -161,12 +161,12 @@ services:
       minio-e2e:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://e2euser:e2epassword@postgres-e2e:5432/e2edb
+      DATABASE_URL: postgresql://${E2E_POSTGRES_USER}:${E2E_POSTGRES_PASSWORD}@postgres-e2e:5432/${E2E_POSTGRES_DB}
       MINIO_ENDPOINT: minio-e2e
       MINIO_PORT: "9000"
       MINIO_USE_SSL: "false"
-      MINIO_ACCESS_KEY: e2eminio
-      MINIO_SECRET_KEY: e2eminio123
+      MINIO_ACCESS_KEY: ${E2E_MINIO_USER}
+      MINIO_SECRET_KEY: ${E2E_MINIO_PASSWORD}
       MINIO_BUCKET: media
       CLIP_MODEL_NAME: ViT-B-32
       CLIP_PRETRAINED: openai

@@ -10,6 +10,17 @@ jobs:
   pytest:
     name: Backend pytest
     runs-on: ubuntu-latest
+    env:
+      TEST_POSTGRES_USER: ci_test_user
+      TEST_POSTGRES_PASSWORD: ci_test_password
+      TEST_POSTGRES_DB: ci_test_db
+      TEST_MINIO_USER: ci_test_minio
+      TEST_MINIO_PASSWORD: ci_test_minio_password
+      E2E_POSTGRES_USER: ci_e2e_user
+      E2E_POSTGRES_PASSWORD: ci_e2e_password
+      E2E_POSTGRES_DB: ci_e2e_db
+      E2E_MINIO_USER: ci_e2e_minio
+      E2E_MINIO_PASSWORD: ci_e2e_minio_password
     steps:
       - uses: actions/checkout@v4
       - name: Run pytest
