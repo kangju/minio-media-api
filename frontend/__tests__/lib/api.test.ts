@@ -3,6 +3,7 @@
  * fetch はすべてモック。実際のネットワーク通信は行わない。
  */
 
+export {};
 const mockFetch = jest.fn();
 global.fetch = mockFetch;
 
