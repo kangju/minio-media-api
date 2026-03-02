@@ -1,8 +1,11 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { MediaResponse, TagResponse } from '@/lib/types';
-import { getMediaList, getTags, getMedia, deleteMedia } from '@/lib/api';
+import { useRef, useState } from 'react';
+import { deleteMedia, getTags } from '@/lib/api';
+import { MediaResponse } from '@/lib/types';
+import { useFilterState } from '@/hooks/useFilterState';
+import { useMediaFetch } from '@/hooks/useMediaFetch';
+import { useSelectMode } from '@/hooks/useSelectMode';
 import Header from '@/components/Header';
 import Gallery from '@/components/Gallery';
 import Lightbox from '@/components/Lightbox';
@@ -14,172 +17,23 @@ import BackToTopButton from '@/components/BackToTopButton';
 type ViewMode = 'grid-large' | 'grid-small' | 'list';
 
 export default function Home() {
-  const [items, setItems] = useState<MediaResponse[]>([]);
-  const [tags, setTags] = useState<TagResponse[]>([]);
-  const [total, setTotal] = useState(0);
-  const [viewMode, setViewMode] = useState<ViewMode>('grid-large');
-  const [selectMode, setSelectMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [activeTags, setActiveTags] = useState<string[]>([]);
-  const [mediaType, setMediaType] = useState('');
-  const [includeDeleted, setIncludeDeleted] = useState(false);
-  const [createdFrom, setCreatedFrom] = useState('');
-  const [createdTo, setCreatedTo] = useState('');
-  const [sortBy, setSortBy] = useState<'created_at' | 'original_filename'>('created_at');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const [lightboxMedia, setLightboxMedia] = useState<MediaResponse | null>(null);
-  const [showUpload, setShowUpload] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
-  const offsetRef = useRef(0);
-  const inflightRef = useRef(0);
-  const requestIdRef = useRef(0);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const filterPanelRef = useRef<HTMLDivElement>(null);
-  const fetchMediaRef = useRef<(reset?: boolean) => Promise<void>>(async () => {});
-  const LIMIT = 50;
 
-  const fetchMedia = useCallback(async (reset = false) => {
-    if (!reset && inflightRef.current > 0) return;
-    inflightRef.current++;
-    setLoading(true);
-    if (reset) setHasMore(true);
-    const requestId = ++requestIdRef.current;
-    try {
-      const currentOffset = reset ? 0 : offsetRef.current;
-      const data = await getMediaList({
-        tags: activeTags.length > 0 ? activeTags : undefined,
-        media_type: mediaType || undefined,
-        include_deleted: includeDeleted || undefined,
-        created_from: createdFrom || undefined,
-        created_to: createdTo || undefined,
-        offset: currentOffset,
-        limit: LIMIT,
-        sort_by: sortBy,
-        sort_order: sortOrder,
-      });
-      if (requestId !== requestIdRef.current) return;
-      const newItems = data.items;
-      if (reset) {
-        setItems(newItems);
-        offsetRef.current = newItems.length;
-      } else {
-        setItems((prev) => [...prev, ...newItems]);
-        offsetRef.current = currentOffset + newItems.length;
-      }
-      setTotal(data.total);
-      setHasMore(currentOffset + newItems.length < data.total);
-    } catch (e) {
-      if (requestId !== requestIdRef.current) return;
-      console.error(e);
-    } finally {
-      inflightRef.current--;
-      if (inflightRef.current === 0) {
-        setLoading(false);
-      }
-    }
-  }, [activeTags, mediaType, includeDeleted, createdFrom, createdTo, sortBy, sortOrder]);
+  const filter = useFilterState();
+  const {
+    items, setItems, tags, setTags, total, setTotal,
+    loading, hasMore, fetchMedia,
+  } = useMediaFetch(filter, sentinelRef);
+  const {
+    selectMode, setSelectMode,
+    selectedIds, setSelectedIds,
+    handleSelect, handleSelectAll,
+  } = useSelectMode(items);
 
-  useEffect(() => {
-    getTags().then(setTags).catch(console.error);
-  }, []);
-
-  // Keep fetchMediaRef up-to-date so IntersectionObserver always calls the latest version
-  useEffect(() => {
-    fetchMediaRef.current = fetchMedia;
-  }, [fetchMedia]);
-
-  // Initial load and when filters change
-  // fetchMedia を .then() コールバック経由で呼び、effect 本体からの同期 setState を回避 (react-hooks/set-state-in-effect)
-  useEffect(() => {
-    offsetRef.current = 0;
-    void Promise.resolve().then(() => fetchMedia(true));
-  }, [activeTags, mediaType, includeDeleted, createdFrom, createdTo, sortBy, sortOrder, fetchMedia]);
-
-  // pendingIdsRef: ポーリング関数が常に最新の ID リストにアクセスできるよう useEffect 内で更新
-  const pendingIdsRef = useRef<number[]>([]);
-  // hasPending はステートから直接算出（レンダー中に ref を書き換えない）
-  const hasPending = items.some(
-    (i) => i.clip_status === 'pending' || i.clip_status === 'running'
-  );
-  useEffect(() => {
-    pendingIdsRef.current = items
-      .filter((i) => i.clip_status === 'pending' || i.clip_status === 'running')
-      .map((i) => i.id);
-  }, [items]);
-
-  // Polling: pending/running アイテムのみ個別取得して in-place 更新
-  useEffect(() => {
-    if (!hasPending) return;
-    let cancelled = false;
-
-    async function poll() {
-      if (cancelled) return;
-      const ids = pendingIdsRef.current;
-      if (ids.length === 0) return;
-      try {
-        const results = await Promise.allSettled(ids.map((id) => getMedia(id)));
-        if (cancelled) return;
-        const updates = results
-          .filter((r): r is PromiseFulfilledResult<MediaResponse> => r.status === 'fulfilled')
-          .map((r) => r.value);
-        if (updates.length > 0) {
-          setItems((prev) =>
-            prev.map((item) => updates.find((u) => u.id === item.id) ?? item)
-          );
-          const anyCompleted = updates.some(
-            (u) => u.clip_status !== 'pending' && u.clip_status !== 'running'
-          );
-          if (anyCompleted) getTags().then(setTags).catch(console.error);
-        }
-      } catch (e) {
-        console.error(e);
-      }
-      if (!cancelled) setTimeout(poll, 5000);
-    }
-
-    const timer = setTimeout(poll, 5000);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [hasPending]);
-
-  // Infinite scroll
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasMore && inflightRef.current === 0) {
-          fetchMediaRef.current(false);
-        }
-      },
-      { threshold: 0.1 }
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [hasMore]);
-
-  function handleTagToggle(tagName: string) {
-    setActiveTags((prev) =>
-      prev.includes(tagName) ? prev.filter((t) => t !== tagName) : [...prev, tagName]
-    );
-  }
-
-  function handleSelect(id: number) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  function handleSelectAll() {
-    const allSelected = items.length > 0 && items.every((i) => selectedIds.has(i.id));
-    setSelectedIds(allSelected ? new Set() : new Set(items.map((i) => i.id)));
-  }
+  const [viewMode, setViewMode] = useState<ViewMode>('grid-large');
+  const [lightboxMedia, setLightboxMedia] = useState<MediaResponse | null>(null);
+  const [showUpload, setShowUpload] = useState(false);
 
   async function handleDeleteSelected() {
     if (!confirm(`Delete ${selectedIds.size} items?`)) return;
@@ -231,32 +85,25 @@ export default function Home() {
       </div>
 
       {/* Tag filter */}
-      <TagFilterBar tags={tags} activeTags={activeTags} onToggle={handleTagToggle} />
+      <TagFilterBar tags={tags} activeTags={filter.activeTags} onToggle={filter.handleTagToggle} />
 
       {/* Filter panel */}
       <div ref={filterPanelRef}>
-      <FilterPanel
-        mediaType={mediaType}
-        includeDeleted={includeDeleted}
-        createdFrom={createdFrom}
-        createdTo={createdTo}
-        sortBy={sortBy}
-        sortOrder={sortOrder}
-        onMediaTypeChange={setMediaType}
-        onIncludeDeletedChange={setIncludeDeleted}
-        onCreatedFromChange={setCreatedFrom}
-        onCreatedToChange={setCreatedTo}
-        onSortByChange={setSortBy}
-        onSortOrderChange={setSortOrder}
-        onReset={() => {
-          setMediaType('');
-          setIncludeDeleted(false);
-          setCreatedFrom('');
-          setCreatedTo('');
-          setSortBy('created_at');
-          setSortOrder('desc');
-        }}
-      />
+        <FilterPanel
+          mediaType={filter.mediaType}
+          includeDeleted={filter.includeDeleted}
+          createdFrom={filter.createdFrom}
+          createdTo={filter.createdTo}
+          sortBy={filter.sortBy}
+          sortOrder={filter.sortOrder}
+          onMediaTypeChange={filter.setMediaType}
+          onIncludeDeletedChange={filter.setIncludeDeleted}
+          onCreatedFromChange={filter.setCreatedFrom}
+          onCreatedToChange={filter.setCreatedTo}
+          onSortByChange={filter.setSortBy}
+          onSortOrderChange={filter.setSortOrder}
+          onReset={filter.resetFilter}
+        />
       </div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -312,8 +159,6 @@ export default function Home() {
           onClose={() => setShowUpload(false)}
           onUploaded={() => {
             setShowUpload(false);
-            offsetRef.current = 0;
-            setHasMore(true);
             fetchMedia(true);
             getTags().then(setTags).catch(console.error);
           }}
