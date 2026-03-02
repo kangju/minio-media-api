@@ -4,13 +4,37 @@ import React, { useState } from 'react';
 import { MediaResponse } from '@/lib/types';
 import { getMediaFileUrl } from '@/lib/api';
 
-interface MediaThumbProps {
+export interface MediaThumbProps {
   media: MediaResponse;
   selected?: boolean;
   selectMode?: boolean;
   onSelect?: (id: number) => void;
   onClick?: (media: MediaResponse) => void;
   size?: 'large' | 'small';
+}
+
+// ⚠️ tags は参照比較（===）だと API レスポンスの度に新配列になり常に false になる。
+// MediaThumb は tags を表示しないため comparator から除外している。
+// 将来タグ表示を追加する際は length + id の浅い比較に変更すること。
+//
+// ⚠️ onClick/onSelect は useCallback で安定化した参照を渡すこと。
+// Gallery から onClick={(m) => ...} のようなインラインを渡すと常に再レンダーになるため禁止。
+export function mediaMemoEqual(
+  prev: MediaThumbProps,
+  next: MediaThumbProps
+): boolean {
+  return (
+    prev.media.id                === next.media.id                &&
+    prev.media.clip_status       === next.media.clip_status       &&
+    prev.media.original_filename === next.media.original_filename &&
+    prev.media.media_type        === next.media.media_type        &&
+    prev.media.deleted_at        === next.media.deleted_at        &&
+    prev.selected                === next.selected                &&
+    prev.selectMode              === next.selectMode              &&
+    prev.size                    === next.size                    &&
+    prev.onSelect                === next.onSelect                &&
+    prev.onClick                 === next.onClick
+  );
 }
 
 export default React.memo(function MediaThumb({
@@ -160,4 +184,4 @@ export default React.memo(function MediaThumb({
       )}
     </div>
   );
-});
+}, mediaMemoEqual);

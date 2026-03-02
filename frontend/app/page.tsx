@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useRef, useState, useCallback } from 'react';
 import { deleteMedia } from '@/lib/api';
 import { MediaResponse } from '@/lib/types';
 import { useFilterState } from '@/hooks/useFilterState';
@@ -45,9 +45,9 @@ export default function Home() {
     refreshTags();
   }
 
-  function handleOpen(media: MediaResponse) {
+  const handleOpen = useCallback((media: MediaResponse) => {
     setLightboxMedia(media);
-  }
+  }, []);
 
   const lightboxIndex = lightboxMedia
     ? items.findIndex((i) => i.id === lightboxMedia.id)
