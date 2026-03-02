@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import fs from 'fs';
 
 const TEST_IMAGE = '/Users/kangju/program/minio-image-api/frontend/public/test-image.jpg';
 
@@ -11,7 +12,6 @@ test.describe('アップロード → 非同期CLIP', () => {
     await page.waitForLoadState('networkidle');
 
     // テスト用画像がなければスキップ
-    const fs = require('fs');
     let testFile = TEST_IMAGE;
     if (!fs.existsSync(testFile)) {
       // public/favicon.icoでも可
