@@ -37,9 +37,10 @@ export function useMediaFetch(
     setLoading(true);
     if (reset) setHasMore(true);
     const requestId = ++requestIdRef.current;
+    const currentOffset = reset ? 0 : offsetRef.current;
+    let data: Awaited<ReturnType<typeof getMediaList>> | undefined;
     try {
-      const currentOffset = reset ? 0 : offsetRef.current;
-      const data = await getMediaList({
+      data = await getMediaList({
         tags: activeTags.length > 0 ? activeTags : undefined,
         media_type: mediaType || undefined,
         include_deleted: includeDeleted || undefined,
@@ -50,42 +51,46 @@ export function useMediaFetch(
         sort_by: sortBy,
         sort_order: sortOrder,
       });
-      if (requestId !== requestIdRef.current) return;
-      const newItems = data.items;
-      if (reset) {
-        setItems(newItems);
-        offsetRef.current = newItems.length;
-      } else {
-        setItems((prev) => [...prev, ...newItems]);
-        offsetRef.current = currentOffset + newItems.length;
-      }
-      setTotal(data.total);
-      setHasMore(currentOffset + newItems.length < data.total);
     } catch (e) {
-      if (requestId !== requestIdRef.current) return;
       console.error(e);
     } finally {
       inflightRef.current--;
-      if (inflightRef.current === 0) {
-        setLoading(false);
-      }
+      if (inflightRef.current === 0) setLoading(false);
     }
+    // stale check and state updates after finally — inflightRef is always decremented
+    if (!data || requestId !== requestIdRef.current) return;
+    const newItems = data.items;
+    if (reset) {
+      setItems(newItems);
+      offsetRef.current = newItems.length;
+    } else {
+      setItems((prev) => [...prev, ...newItems]);
+      offsetRef.current = currentOffset + newItems.length;
+    }
+    setTotal(data.total);
+    setHasMore(currentOffset + newItems.length < data.total);
   }, [activeTags, mediaType, includeDeleted, createdFrom, createdTo, sortBy, sortOrder]);
 
-  useEffect(() => {
+  const refreshTags = useCallback(() => {
     getTags().then(setTags).catch(console.error);
   }, []);
+
+  useEffect(() => {
+    refreshTags();
+  }, [refreshTags]);
 
   // Keep fetchMediaRef up-to-date so IntersectionObserver always calls the latest version
   useEffect(() => {
     fetchMediaRef.current = fetchMedia;
   }, [fetchMedia]);
 
-  // Initial load and when filters change
+  // Initial load and when filters change.
+  // deps is [fetchMedia] only — fetchMedia's own useCallback deps already cover all filter values,
+  // so this avoids the double-trigger risk when filter state changes.
   useEffect(() => {
     offsetRef.current = 0;
     void Promise.resolve().then(() => fetchMedia(true));
-  }, [activeTags, mediaType, includeDeleted, createdFrom, createdTo, sortBy, sortOrder, fetchMedia]);
+  }, [fetchMedia]);
 
   // pendingIdsRef: ポーリング関数が常に最新の ID リストにアクセスできるよう useEffect 内で更新
   const pendingIdsRef = useRef<number[]>([]);
@@ -120,7 +125,7 @@ export function useMediaFetch(
           const anyCompleted = updates.some(
             (u) => u.clip_status !== 'pending' && u.clip_status !== 'running'
           );
-          if (anyCompleted) getTags().then(setTags).catch(console.error);
+          if (anyCompleted) refreshTags();
         }
       } catch (e) {
         console.error(e);
@@ -133,9 +138,9 @@ export function useMediaFetch(
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [hasPending]);
+  }, [hasPending, refreshTags]);
 
-  // Infinite scroll
+  // Infinite scroll — sentinelRef is a stable ref object, no need to include in deps
   useEffect(() => {
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
@@ -149,14 +154,15 @@ export function useMediaFetch(
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMore, sentinelRef]);
+  }, [hasMore]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
     items, setItems,
-    tags, setTags,
+    tags,
     total, setTotal,
     loading,
     hasMore,
     fetchMedia,
+    refreshTags,
   };
 }

@@ -5,7 +5,6 @@
  * の動作を検証する。
  */
 import { renderHook, act, waitFor } from '@testing-library/react';
-import { useRef } from 'react';
 import { useMediaFetch } from '@/hooks/useMediaFetch';
 import { MediaResponse } from '@/lib/types';
 
@@ -126,6 +125,59 @@ describe('useMediaFetch - 基本fetch動作', () => {
     mockGetMediaList.mockResolvedValue({ items: [makeMedia(1)], total: 1 });
     const { result } = renderUseMediaFetch();
     await waitFor(() => expect(result.current.hasMore).toBe(false));
+  });
+
+  it('stale fetch 時も inflightRef が必ずデクリメントされる（finally は常に実行）', async () => {
+    // fetch1 (保留) → fetch2 (即解決) → fetch1 解決（stale）
+    // stale でも finally が実行され inflightRef=0 になること
+    let resolveFirst!: (v: unknown) => void;
+    const firstFetch = new Promise((r) => { resolveFirst = r; });
+    mockGetMediaList
+      .mockReturnValueOnce(firstFetch)
+      .mockResolvedValueOnce({ items: [makeMedia(99)], total: 1 });
+
+    const sentinelRef = { current: document.createElement('div') };
+    const { result, rerender } = renderHook(
+      (filter) => useMediaFetch(filter, sentinelRef as React.RefObject<HTMLDivElement>),
+      { initialProps: defaultFilter }
+    );
+
+    // fetch1 が発火するまで待つ
+    await waitFor(() => expect(mockGetMediaList).toHaveBeenCalledTimes(1));
+
+    // フィルター変更で fetch2 をトリガー
+    await act(async () => {
+      rerender({ ...defaultFilter, mediaType: 'image' });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(result.current.items.some((i) => i.id === 99)).toBe(true));
+
+    // fetch1 を解決（stale）— finally で inflightRef がデクリメントされるため
+    // 以降のスクロールfetch がブロックされない（loading=false）
+    await act(async () => {
+      resolveFirst({ items: [makeMedia(1)], total: 1 });
+      await Promise.resolve();
+    });
+
+    // stale fetch 解決後も loading は false のまま（finally が確実に実行された証拠）
+    expect(result.current.loading).toBe(false);
+    // stale の items は反映されない
+    expect(result.current.items.some((i) => i.id === 1)).toBe(false);
+  });
+
+  it('refreshTags() を呼ぶと getTags が実行される', async () => {
+    mockGetMediaList.mockResolvedValue({ items: [], total: 0 });
+    const { result } = renderUseMediaFetch();
+    await waitFor(() => expect(mockGetTags).toHaveBeenCalledTimes(1));
+
+    mockGetTags.mockResolvedValue([]);
+    await act(async () => {
+      result.current.refreshTags();
+      await Promise.resolve();
+    });
+
+    expect(mockGetTags).toHaveBeenCalledTimes(2);
   });
 });
 

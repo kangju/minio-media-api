@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { deleteMedia, getTags } from '@/lib/api';
+import { deleteMedia } from '@/lib/api';
 import { MediaResponse } from '@/lib/types';
 import { useFilterState } from '@/hooks/useFilterState';
 import { useMediaFetch } from '@/hooks/useMediaFetch';
@@ -22,13 +22,13 @@ export default function Home() {
 
   const filter = useFilterState();
   const {
-    items, setItems, tags, setTags, total, setTotal,
-    loading, hasMore, fetchMedia,
+    items, setItems, tags, total, setTotal,
+    loading, hasMore, fetchMedia, refreshTags,
   } = useMediaFetch(filter, sentinelRef);
   const {
     selectMode, setSelectMode,
     selectedIds, setSelectedIds,
-    handleSelect, handleSelectAll,
+    handleSelect, handleSelectAll, exitSelectMode,
   } = useSelectMode(items);
 
   const [viewMode, setViewMode] = useState<ViewMode>('grid-large');
@@ -41,9 +41,8 @@ export default function Home() {
     await Promise.all(Array.from(idsToDelete).map((id) => deleteMedia(id)));
     setItems((prev) => prev.filter((i) => !idsToDelete.has(i.id)));
     setTotal((prev) => prev - idsToDelete.size);
-    setSelectedIds(new Set());
-    setSelectMode(false);
-    getTags().then(setTags).catch(console.error);
+    exitSelectMode();
+    refreshTags();
   }
 
   function handleOpen(media: MediaResponse) {
@@ -62,8 +61,8 @@ export default function Home() {
         onViewModeChange={setViewMode}
         selectMode={selectMode}
         onSelectModeChange={(v) => {
-          setSelectMode(v);
-          if (!v) setSelectedIds(new Set());
+          if (v) setSelectMode(true);
+          else exitSelectMode();
         }}
         selectedCount={selectedIds.size}
         onDeleteSelected={handleDeleteSelected}
@@ -160,7 +159,7 @@ export default function Home() {
           onUploaded={() => {
             setShowUpload(false);
             fetchMedia(true);
-            getTags().then(setTags).catch(console.error);
+            refreshTags();
           }}
         />
       )}

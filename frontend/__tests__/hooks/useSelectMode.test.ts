@@ -73,4 +73,19 @@ describe('useSelectMode', () => {
     expect(result.current.selectMode).toBe(false);
     expect(result.current.selectedIds.size).toBe(0);
   });
+
+  it('exitSelectMode() で selectMode=false かつ selectedIds が空になる', () => {
+    const { result } = renderHook(() => useSelectMode([makeMedia(1), makeMedia(2)]));
+    act(() => {
+      result.current.setSelectMode(true);
+      result.current.handleSelect(1);
+      result.current.handleSelect(2);
+    });
+    expect(result.current.selectMode).toBe(true);
+    expect(result.current.selectedIds.size).toBe(2);
+
+    act(() => { result.current.exitSelectMode(); });
+    expect(result.current.selectMode).toBe(false);
+    expect(result.current.selectedIds.size).toBe(0);
+  });
 });
