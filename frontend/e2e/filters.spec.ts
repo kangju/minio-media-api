@@ -261,4 +261,57 @@ test.describe('ソート機能', () => {
     await expect(page.locator('[data-testid="sort-by-select"]')).toHaveValue('created_at');
     await expect(page.locator('[data-testid="sort-order-select"]')).toHaveValue('desc');
   });
+
+  test('ソート条件を連続切替しても最終選択条件で一覧表示される', async ({ page }) => {
+    const sortBySelect = page.locator('[data-testid="sort-by-select"]');
+
+    // 最後のメディア一覧 API リクエストの sort_by パラメータを記録する
+    let lastSortBy = '';
+    page.on('request', (req) => {
+      const url = req.url();
+      if (url.includes('/api/media') && !url.match(/\/api\/media\/\d/)) {
+        const m = url.match(/sort_by=([^&]+)/);
+        if (m) lastSortBy = decodeURIComponent(m[1]);
+      }
+    });
+
+    // 短時間で連続切替
+    await sortBySelect.selectOption('original_filename');
+    await sortBySelect.selectOption('created_at');
+    await sortBySelect.selectOption('original_filename');
+
+    // 最終選択値が反映されていることを確認
+    await expect(sortBySelect).toHaveValue('original_filename');
+
+    // ネットワークが落ち着くまで待機
+    // React はスケジューラ（macrotask）経由で再レンダリングするため、
+    // selectOption 直後は API リクエストがまだ発行されていない。
+    // 少し待って React がリクエストを開始できる時間を確保してから networkidle を確認する。
+    await page.waitForTimeout(300);
+    await page.waitForLoadState('networkidle');
+    await expect(page.locator('[data-testid="sort-by-select"]')).toHaveValue('original_filename');
+
+    // 最後の API リクエストが正しいソート条件（sort_by=original_filename）で発行されていること
+    expect(lastSortBy).toBe('original_filename');
+
+    // APIレスポンスの先頭N件が original_filename 降順（sort_order=desc）に並んでいることを
+    // DOM の実表示順（[data-filename] 属性）と API レスポンス順の両方で検証する。
+    // localeCompare ではなく API を正とすることで PostgreSQL の照合順序と一致させる。
+    // DOM と API が一致しない場合、競合レスポンスによる表示順崩れを検知できる。
+    const thumbs = page.locator('[data-filename]');
+    const firstFilenames = await thumbs.evaluateAll(
+      (els: Element[]) => els.slice(0, 5).map((el) => el.getAttribute('data-filename') ?? '')
+    );
+    expect(firstFilenames.length).toBeGreaterThan(1);
+
+    // 同一パラメータで API を直接呼び、DOM 順が API 順と一致することを確認する
+    const apiRes = await page.request.get(
+      `/api/media?sort_by=original_filename&sort_order=desc&limit=${firstFilenames.length}`
+    );
+    expect(apiRes.ok()).toBe(true);
+    const apiData = await apiRes.json();
+    const expectedOrder = (apiData.items as Array<{ original_filename: string }>)
+      .map((i) => i.original_filename);
+    expect(firstFilenames).toEqual(expectedOrder);
+  });
 });

@@ -749,6 +749,52 @@ class TestGetMediaFileMissingKey:
         assert r.status_code == 409
 
 
+class TestGetMediaFileHeaders:
+    """GET /media/{id}/file の HTTP ヘッダ回帰テスト（ETag / Cache-Control）。"""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, client):
+        """テスト用メディアをアップロードする。"""
+        r = client.post(
+            "/media",
+            files=[make_upload_file(MINIMAL_JPEG, "header_test.jpg", "image/jpeg")],
+        )
+        assert r.status_code == 201
+        self.media_id = r.json()["id"]
+
+    def test_etag_header_present(self, client):
+        """ETag ヘッダが '"<hash>"' 形式で存在する。"""
+        r = client.get(f"/media/{self.media_id}/file")
+        assert r.status_code == 200
+        assert "etag" in r.headers
+        etag = r.headers["etag"]
+        # ETag は '"<hash値>"' 形式（ダブルクォート囲み）
+        assert etag.startswith('"') and etag.endswith('"')
+
+    def test_cache_control_header_present(self, client):
+        """Cache-Control が public, max-age=31536000, immutable である。"""
+        r = client.get(f"/media/{self.media_id}/file")
+        assert r.status_code == 200
+        assert "cache-control" in r.headers
+        assert r.headers["cache-control"] == "public, max-age=31536000, immutable"
+
+    def test_etag_matches_file_hash(self, client, db_engine):
+        """ETag の値が DB の file_hash と一致する。"""
+        from sqlalchemy import text
+
+        r = client.get(f"/media/{self.media_id}/file")
+        assert r.status_code == 200
+        etag_value = r.headers["etag"].strip('"')
+
+        with db_engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT file_hash FROM media WHERE id = :id"),
+                {"id": self.media_id},
+            ).fetchone()
+        assert row is not None
+        assert etag_value == row[0]
+
+
 class TestDeleteMedia:
     """DELETE /media/{id} エンドポイントのテスト。"""
 

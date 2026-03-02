@@ -5,7 +5,7 @@
  * スクロール済みのアイテムが消えないことを確認する。
  */
 import React from 'react';
-import { render, screen, act, waitFor } from '@testing-library/react';
+import { render, screen, act, waitFor, fireEvent } from '@testing-library/react';
 import Home from '@/app/page';
 import { MediaResponse, TagResponse } from '@/lib/types';
 
@@ -348,5 +348,132 @@ describe('Issue #15 – IntersectionObserver 再生成の抑制', () => {
     // fetchMedia 参照が変わっても hasMore が変わらなければ observer は再生成されない
     // → mountedと同じ countAfterMount のまま
     expect(observerInstanceCount).toBe(countAfterMount);
+  });
+})
+
+describe('Issue #14 – stale request クリーンアップ', () => {
+  // stale request が finally で確実に inflightRef を減算し、loading が張り付かないことを検証
+
+  beforeEach(() => {
+    mockGetTags.mockResolvedValue([]);
+  });
+
+  it('pending fetch が finally で loading を解除する（finally クリーンアップ）', async () => {
+    // fetch1（保留）が解決された後に finally が実行され LOADING... が消えることを確認
+    let resolveFirst!: (v: unknown) => void;
+    const firstFetch = new Promise((r) => { resolveFirst = r; });
+
+    // 1回目: 保留
+    mockGetMediaList.mockReturnValueOnce(firstFetch);
+
+    await act(async () => {
+      render(<Home />);
+    });
+
+    // fetch1 進行中 → LOADING... が表示されているはず
+    expect(screen.getByText('LOADING...')).toBeInTheDocument();
+
+    // fetch1 を解決 → finally で inflightRef=0 → loading=false → LOADING... が消える
+    await act(async () => {
+      resolveFirst({ items: [makeMedia(1)], total: 1 });
+      await Promise.resolve();
+    });
+
+    // stale でも finally が実行されるので loading は解除される
+    await waitFor(() => {
+      expect(screen.queryByText('LOADING...')).toBeNull();
+    });
+  });
+
+  it('stale request の結果は items に反映されない', async () => {
+    // stale シナリオ:
+    // 1. fetch1 (filter A, 保留)
+    // 2. filter 変更 → fetch2 (filter B, 即解決) → items = [makeMedia(99)]
+    // 3. fetch1 解決 → requestId が古い（stale）→ setItems されない
+    // 4. items は [makeMedia(99)] のまま（makeMedia(1) が混入しない）
+    let resolveFirst!: (v: unknown) => void;
+    const firstFetch = new Promise((r) => { resolveFirst = r; });
+
+    // fetch1: 保留, fetch2: 即解決（filter 変更後に呼ばれる）
+    mockGetMediaList
+      .mockReturnValueOnce(firstFetch)
+      .mockResolvedValueOnce({ items: [makeMedia(99)], total: 1 });
+
+    await act(async () => {
+      render(<Home />);
+    });
+
+    // fetch1 は進行中（inflightRef=1）
+    // filter を変更して fetch2 をトリガー
+    // reset=true なので inflightRef のガードをスキップして発火する
+    const mediaTypeSelect = document.querySelector('[data-testid="media-type-select"]') as HTMLSelectElement;
+    if (mediaTypeSelect) {
+      await act(async () => {
+        fireEvent.change(mediaTypeSelect, { target: { value: 'image' } });
+        await Promise.resolve();
+      });
+    }
+
+    // fetch2 が即解決 → items = [makeMedia(99)]
+    await waitFor(() => {
+      expect(screen.queryByText('file99.jpg')).toBeInTheDocument();
+    });
+
+    // fetch1 を解決（stale: requestId=1 ≠ requestIdRef.current=2）
+    await act(async () => {
+      resolveFirst({ items: [makeMedia(1)], total: 1 });
+      await Promise.resolve();
+    });
+
+    // stale な fetch1 の結果は無視されるので file1.jpg は表示されない
+    await waitFor(() => {
+      expect(screen.queryByText('file1.jpg')).toBeNull();
+      expect(screen.queryByText('file99.jpg')).toBeInTheDocument();
+    });
+  });
+})
+
+describe('Issue #14 – 重複アイテム混入防止', () => {
+  beforeEach(() => {
+    mockGetTags.mockResolvedValue([]);
+  });
+
+  it('スクロール fetch 完了後に重複アイテムが混入しない', async () => {
+    const page1Items = Array.from({ length: 50 }, (_, i) => makeMedia(i + 1));
+    const page2Items = Array.from({ length: 50 }, (_, i) => makeMedia(i + 51));
+
+    let resolveScroll!: (v: unknown) => void;
+    const scrollFetch = new Promise((r) => { resolveScroll = r; });
+
+    // 1回目: 即解決, 2回目: 保留
+    mockGetMediaList
+      .mockResolvedValueOnce({ items: page1Items, total: 100 })
+      .mockReturnValueOnce(scrollFetch);
+
+    await act(async () => {
+      render(<Home />);
+    });
+
+    // 初期ロード後のアイテム数: 50
+    // IntersectionObserver でスクロール fetch をトリガー
+    if (lastIntersectionCallback) {
+      act(() => { lastIntersectionCallback!([{ isIntersecting: true }]); });
+    }
+
+    // スクロール fetch 完了
+    await act(async () => {
+      resolveScroll({ items: page2Items, total: 100 });
+      await Promise.resolve();
+    });
+
+    // 2回スクロールトリガー → inflightRef > 0 でブロック → 余分な fetch なし
+    // 最終的に getMediaList は最大 2 回（初期 + スクロール 1 回）
+    expect(mockGetMediaList.mock.calls.length).toBeLessThanOrEqual(2);
+
+    // DOM 上に重複アイテムが存在しないことを確認（setItems が正しく機能している）
+    const imgs = document.querySelectorAll('img');
+    const alts = Array.from(imgs).map((img) => img.getAttribute('alt')!);
+    expect(alts.length).toBe(100); // page1(50) + page2(50)
+    expect(new Set(alts).size).toBe(alts.length); // 重複なし
   });
 })

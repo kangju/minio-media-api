@@ -4,10 +4,17 @@ version: "3.9"
 # 本番コンテナ（docker-compose.yml）とは別ポートで起動し、テスト後にボリュームを削除する。
 #
 # 使い方:
-#   docker compose -f docker-compose.test.yml up --build --abort-on-container-exit
-#   docker compose -f docker-compose.test.yml down -v
+#   Pytest のみ:
+#     docker compose -f docker-compose.test.yml run --rm api-test
+#     docker compose -f docker-compose.test.yml down -v
+#
+#   E2E のみ（Pytest 後に実施、別ボリューム使用）:
+#     docker compose -f docker-compose.test.yml up -d --build api-server-test frontend-e2e clip-worker-e2e
+#     cd frontend && PW_BASE_URL=http://localhost:3001 npx playwright test
+#     docker compose -f docker-compose.test.yml down -v
 
 services:
+  # ─── Pytest 用インフラ ─────────────────────────────────────────────
   postgres-test:
     image: postgres:15
     ports:
@@ -66,7 +73,7 @@ services:
       MAX_FILE_SIZE_MB: "500"
       PAGINATION_DEFAULT_LIMIT: "30"
       PAGINATION_MAX_LIMIT: "100"
-      CORS_ORIGINS: "http://localhost:3000"
+      CORS_ORIGINS: "http://localhost:3001"
       CORS_ALLOW_CREDENTIALS: "true"
       CORS_ALLOW_METHODS: "*"
       CORS_ALLOW_HEADERS: "*"
@@ -75,6 +82,112 @@ services:
     volumes:
       - model_test_cache:/root/.cache
 
+  # ─── E2E 用インフラ（Pytest と完全隔離）────────────────────────────
+  postgres-e2e:
+    image: postgres:15
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_USER: e2euser
+      POSTGRES_PASSWORD: e2epassword
+      POSTGRES_DB: e2edb
+    volumes:
+      - postgres_e2e_data:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U e2euser -d e2edb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  minio-e2e:
+    image: minio/minio
+    ports:
+      - "9004:9000"
+      - "9005:9001"
+    environment:
+      MINIO_ROOT_USER: e2eminio
+      MINIO_ROOT_PASSWORD: e2eminio123
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  api-server-test:
+    build:
+      context: ./app
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres-e2e:
+        condition: service_healthy
+      minio-e2e:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://e2euser:e2epassword@postgres-e2e:5432/e2edb
+      MINIO_ENDPOINT: minio-e2e
+      MINIO_PORT: "9000"
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: e2eminio
+      MINIO_SECRET_KEY: e2eminio123
+      MINIO_BUCKET: media
+      CLIP_MODEL_NAME: ViT-B-32
+      CLIP_PRETRAINED: openai
+      CLIP_PROMPT_TEMPLATE: "a photo of a {tag}"
+      CLIP_SCORE_THRESHOLD: "0.2"
+      CLIP_TOP_K: "10"
+      MAX_FILE_SIZE_MB: "500"
+      PAGINATION_DEFAULT_LIMIT: "30"
+      PAGINATION_MAX_LIMIT: "100"
+      CORS_ORIGINS: "http://localhost:3001"
+      CORS_ALLOW_CREDENTIALS: "true"
+      CORS_ALLOW_METHODS: "*"
+      CORS_ALLOW_HEADERS: "*"
+    command: >
+      sh -c "cd /app && uvicorn main:app --host 0.0.0.0 --port 8000"
+    volumes:
+      - model_test_cache:/root/.cache
+
+  clip-worker-e2e:
+    build:
+      context: ./worker
+    depends_on:
+      postgres-e2e:
+        condition: service_healthy
+      minio-e2e:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://e2euser:e2epassword@postgres-e2e:5432/e2edb
+      MINIO_ENDPOINT: minio-e2e
+      MINIO_PORT: "9000"
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: e2eminio
+      MINIO_SECRET_KEY: e2eminio123
+      MINIO_BUCKET: media
+      CLIP_MODEL_NAME: ViT-B-32
+      CLIP_PRETRAINED: openai
+      CLIP_PROMPT_TEMPLATE: "a photo of a {tag}"
+      CLIP_SCORE_THRESHOLD: "0.2"
+      CLIP_TOP_K: "10"
+    volumes:
+      - model_test_cache:/root/.cache
+    restart: unless-stopped
+
+  frontend-e2e:
+    build:
+      context: ./frontend
+    ports:
+      - "3001:3000"
+    environment:
+      - BACKEND_URL=http://api-server-test:8000
+    depends_on:
+      - api-server-test
+
 volumes:
   postgres_test_data:
+  postgres_e2e_data:
   model_test_cache:
