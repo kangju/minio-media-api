@@ -315,3 +315,100 @@ test.describe('ソート機能', () => {
     expect(firstFilenames).toEqual(expectedOrder);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Issue #24: フィルタ変更直後スクロール競合テスト
+// ---------------------------------------------------------------------------
+// page.route() で /api/media をモックし has_more: true を返す。
+// seed データ 5件 < LIMIT 50 では通常 hasMore=false だが、モックにより
+// 無限スクロールが有効になりレース条件を再現できる。
+// 主検証: フィルタ変更直後にスクロールしても旧条件リクエスト（旧フィルタ + offset>0）が出ないこと。
+test.describe('フィルタ変更直後スクロール競合テスト (#24)', () => {
+  // モック用の最小完全データ
+  const FAKE_ITEM = {
+    id: 9001,
+    original_filename: 'mock-image.jpg',
+    media_type: 'image',
+    minio_key: 'test/mock-image.jpg',
+    created_at: '2024-01-01T00:00:00Z',
+    deleted_at: null,
+    tags: [],
+    clip_status: 'done',
+  };
+
+  test('フィルタ変更直後にスクロールしても旧条件リクエストが出ない', async ({ page }) => {
+    // /api/media（一覧）をモック:
+    // - フィルタなし (offset+limit < 100): has_more: true → IntersectionObserver を有効化しレース条件を再現
+    // - media_type=image: has_more: false → フィルタ変更後は追加スクロールを発生させず networkidle に収束させる
+    await page.route('**/api/media**', async (route) => {
+      // 個別メディア取得（/api/media/123）はスルー
+      if (route.request().url().match(/\/api\/media\/\d+/)) {
+        return route.continue();
+      }
+      const params = new URLSearchParams(new URL(route.request().url()).search);
+      const offset = parseInt(params.get('offset') || '0');
+      const limit = parseInt(params.get('limit') || '50');
+      const mediaType = params.get('media_type');
+      // フィルタ変更後（media_type=image）は has_more: false にして無限スクロールを止める
+      const hasMore = !mediaType && offset + limit < 100;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          items: [FAKE_ITEM],
+          total: hasMore ? 100 : 1,
+          has_more: hasMore,
+        }),
+      });
+    });
+
+    await page.goto('/');
+    await page.waitForSelector('[data-testid="media-type-select"]');
+
+    // フィルタ変更後のリクエストのみ収集
+    const postFilterRequests: { offset: number; mediaType: string | null }[] = [];
+    let collecting = false;
+    page.on('request', (req) => {
+      if (!collecting) return;
+      const url = req.url();
+      if (url.includes('/api/media') && !url.match(/\/api\/media\/\d+/)) {
+        const p = new URLSearchParams(new URL(url).search);
+        postFilterRequests.push({
+          offset: parseInt(p.get('offset') || '0'),
+          mediaType: p.get('media_type'),
+        });
+      }
+    });
+
+    // フィルタを変更し直後にスクロール（レース誘発）
+    // waitForRequest は selectOption より前に設定する（Playwright のパターン）
+    const imageFilterRequestPromise = page.waitForRequest((req) =>
+      req.url().includes('/api/media') &&
+      req.url().includes('media_type=image') &&
+      !req.url().match(/\/api\/media\/\d+/)
+    );
+
+    collecting = true;
+    await page.locator('[data-testid="media-type-select"]').selectOption('image');
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+
+    // フィルタ変更後の media_type=image リクエストを待機
+    await imageFilterRequestPromise;
+
+    // 観測ウィンドウ: 最初のリクエスト到達直後に遅れて発火する旧条件リクエストも収集できるよう
+    // networkidle まで待機してから検証する。これにより「少し遅れた offset>0 旧条件リクエスト」を取りこぼさない。
+    await page.waitForLoadState('networkidle');
+
+    // 検証1: フィルタ変更後に media_type=image + offset=0 のリクエストが ≥1 回あること（テスト意図の明示）
+    const initialFilterRequests = postFilterRequests.filter(
+      (r) => r.mediaType === 'image' && r.offset === 0
+    );
+    expect(initialFilterRequests.length).toBeGreaterThanOrEqual(1);
+
+    // 検証2: フィルタ変更後のリクエストに「旧条件（media_type なし）+ offset > 0」が存在しないこと
+    const staleRequests = postFilterRequests.filter(
+      (r) => r.offset > 0 && !r.mediaType
+    );
+    expect(staleRequests).toHaveLength(0);
+  });
+});

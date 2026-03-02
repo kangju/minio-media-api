@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, RefObject } from 'react';
+import useIsomorphicLayoutEffect from './useIsomorphicLayoutEffect';
 import { MediaResponse, TagResponse } from '@/lib/types';
 import { getMediaList, getMedia, getTags } from '@/lib/api';
 
@@ -79,8 +80,12 @@ export function useMediaFetch(
     refreshTags();
   }, [refreshTags]);
 
-  // Keep fetchMediaRef up-to-date so IntersectionObserver always calls the latest version
-  useEffect(() => {
+  // useIsomorphicLayoutEffect で描画前に ref を同期更新する。
+  // useEffect だとフィルタ変更後の React コミット〜useEffect 実行の間に
+  // IntersectionObserver が発火し、旧 fetchMedia（旧フィルタ条件）が呼ばれるレースがある。
+  // useLayoutEffect はコミット直後（ペイント前）に同期実行されるためこの競合を排除できる。
+  // SSR 安全性のため useIsomorphicLayoutEffect を使用する（Issue #24）。
+  useIsomorphicLayoutEffect(() => {
     fetchMediaRef.current = fetchMedia;
   }, [fetchMedia]);
 

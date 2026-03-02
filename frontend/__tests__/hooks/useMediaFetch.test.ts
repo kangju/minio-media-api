@@ -187,7 +187,7 @@ describe('useMediaFetch - inflightRef ガード', () => {
     const firstFetch = new Promise((r) => { resolve = r; });
     mockGetMediaList.mockReturnValueOnce(firstFetch);
 
-    const { result } = renderUseMediaFetch();
+    renderUseMediaFetch();
     // 1st fetch が発火するまで待つ（useEffect は Promise.resolve 経由で非同期）
     await waitFor(() => expect(mockGetMediaList).toHaveBeenCalledTimes(1));
 
@@ -311,5 +311,57 @@ describe('useMediaFetch - ポーリング', () => {
     expect(mockGetMedia).toHaveBeenCalledWith(2);
     // クラッシュせず id=2 が still present
     expect(result.current.items.some((i) => i.id === 2)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #24: fetchMediaRef レース対策（useIsomorphicLayoutEffect）
+// ---------------------------------------------------------------------------
+// 注意: @testing-library/react は act() 内で useLayoutEffect・useEffect を
+// 両方フラッシュするため、Jest 環境ではタイミングの差（レース再現）は検証不可能。
+// このテストは「フィルタ変更後に IntersectionObserver が発火したとき
+// 最新フィルタ条件で API が呼ばれる」パラメータ整合性チェックを行う補助テスト。
+// レース条件の主検証は E2E (filters.spec.ts) で行う。
+describe('useMediaFetch - Issue #24 fetchMediaRef レース対策', () => {
+  it('フィルタ変更後に IntersectionObserver が発火しても最新フィルタ条件で fetch される', async () => {
+    // フィルタ A: mediaType='' (全件)
+    mockGetMediaList.mockResolvedValue({ items: [makeMedia(1)], total: 100 });
+
+    const sentinelRef = { current: document.createElement('div') };
+    const { result, rerender } = renderHook(
+      (filter) => useMediaFetch(filter, sentinelRef as React.RefObject<HTMLDivElement>),
+      { initialProps: defaultFilter }
+    );
+
+    // 初回ロード完了を確認
+    await waitFor(() => expect(result.current.items).toHaveLength(1));
+    const callsAfterInit = mockGetMediaList.mock.calls.length;
+
+    // フィルタ B: mediaType='image' に変更（act 内で useLayoutEffect + useEffect 両方フラッシュ）
+    mockGetMediaList.mockResolvedValue({ items: [makeMedia(2)], total: 50 });
+    await act(async () => {
+      rerender({ ...defaultFilter, mediaType: 'image' });
+      await Promise.resolve();
+    });
+
+    // IntersectionObserver コールバックを即座に発火（フィルタ変更後の scroll を模倣）
+    await act(async () => {
+      lastIntersectionCallback?.([{ isIntersecting: true }]);
+      await Promise.resolve();
+    });
+
+    // 少なくともフィルタ B の条件（media_type='image'）で API が呼ばれていること
+    const newCalls = mockGetMediaList.mock.calls.slice(callsAfterInit);
+    expect(newCalls.length).toBeGreaterThanOrEqual(1);
+    const hasNewFilterCall = newCalls.some(
+      (args) => args[0]?.media_type === 'image'
+    );
+    expect(hasNewFilterCall).toBe(true);
+
+    // 旧フィルタ条件（media_type なし）+ offset > 0 のリクエストが存在しないこと
+    const staleCall = newCalls.find(
+      (args) => !args[0]?.media_type && (args[0]?.offset ?? 0) > 0
+    );
+    expect(staleCall).toBeUndefined();
   });
 });
