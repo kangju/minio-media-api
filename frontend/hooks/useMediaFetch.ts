@@ -119,9 +119,8 @@ export function useMediaFetch(
           .filter((r): r is PromiseFulfilledResult<MediaResponse> => r.status === 'fulfilled')
           .map((r) => r.value);
         if (updates.length > 0) {
-          setItems((prev) =>
-            prev.map((item) => updates.find((u) => u.id === item.id) ?? item)
-          );
+          const updateMap = new Map(updates.map((u) => [u.id, u]));
+          setItems((prev) => prev.map((item) => updateMap.get(item.id) ?? item));
           const anyCompleted = updates.some(
             (u) => u.clip_status !== 'pending' && u.clip_status !== 'running'
           );
