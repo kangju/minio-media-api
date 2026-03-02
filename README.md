@@ -1,4 +1,4 @@
-# MinIO Image API
+# MinIO Media API
 
 MinIO・PostgreSQL・FastAPI を使用した画像・動画アップロード API。CLIP による自動タグ付け機能を提供する。
 
@@ -189,6 +189,7 @@ docker compose --env-file .env.test -f docker-compose.test.yml down -v
 │  │  ├── schemas.py     (Pydantic スキーマ)          │  │
 │  │  ├── crud.py        (CRUD 操作)                  │  │
 │  │  ├── validators.py  (バリデーション)             │  │
+│  │  ├── data/          (初期データ)                 │  │
 │  │  ├── routers/       (エンドポイント)             │  │
 │  │  └── services/      (外部サービス連携)           │  │
 │  └───────────────────────────────────────────────────┘  │
