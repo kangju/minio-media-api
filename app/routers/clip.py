@@ -3,7 +3,10 @@
 画像ファイルを MinIO や DB に保存せず CLIP 解析のみを行うエンドポイントを提供する。
 """
 
-from fastapi import APIRouter, Depends, UploadFile
+import json
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 import crud
@@ -19,16 +22,22 @@ router = APIRouter(prefix="/clip", tags=["clip"])
 @router.post("/analyze", response_model=ClipAnalyzeResponse)
 async def analyze_clip(
     file: UploadFile,
+    candidates: Optional[str] = Form(default=None),
     db: Session = Depends(get_db),
     clip: ClipService = Depends(get_clip_service),
 ) -> ClipAnalyzeResponse:
     """画像を CLIP で解析してタグを返す。
 
     DB への保存や MinIO へのアップロードは行わない。
-    DB に登録済みの全タグを候補として CLIP スコアを計算する。
+    ``candidates`` を指定した場合はそのタグのみを解析候補とし、
+    未指定の場合は DB に登録済みの全タグを候補として CLIP スコアを計算する。
 
     Args:
         file: 解析する画像ファイル。
+        candidates: 解析候補タグの JSON 配列文字列（任意）。
+            例: ``'["cat", "dog", "outdoor"]'``
+            指定した場合はそのタグのみを候補とする。
+            未指定の場合は DB 全タグを候補とする。
         db: データベースセッション。
         clip: CLIP サービス。
 
@@ -37,7 +46,8 @@ async def analyze_clip(
 
     Raises:
         HTTPException: 画像以外のファイルが指定された場合（422）、
-            ファイルサイズが上限を超えた場合（422）。
+            ファイルサイズが上限を超えた場合（422）、
+            candidates が正しい JSON 配列でない場合（422）。
     """
     content_type = file.content_type or ""
     validate_image_only(content_type, file.filename or "")
@@ -45,8 +55,29 @@ async def analyze_clip(
     data = await file.read()
     validate_file_size(len(data), settings.max_file_size_mb)
 
-    all_tags = crud.get_all_tags(db)
-    candidate_names = list({t["name"] for t in all_tags})
+    if candidates is not None:
+        try:
+            parsed = json.loads(candidates)
+        except json.JSONDecodeError:
+            raise HTTPException(
+                status_code=422,
+                detail=[{"loc": ["body", "candidates"], "msg": "有効な JSON を指定してください。", "type": "value_error"}],
+            )
+        if not isinstance(parsed, list):
+            raise HTTPException(
+                status_code=422,
+                detail=[{"loc": ["body", "candidates"], "msg": "JSON 配列として送信してください。例: '[\"cat\", \"dog\"]'", "type": "value_error"}],
+            )
+        if not all(isinstance(t, str) for t in parsed):
+            raise HTTPException(
+                status_code=422,
+                detail=[{"loc": ["body", "candidates"], "msg": "candidates の各要素は文字列である必要があります。", "type": "value_error"}],
+            )
+        candidate_names = list({t.strip() for t in parsed if t.strip()})
+    else:
+        all_tags = crud.get_all_tags(db)
+        candidate_names = list({t["name"] for t in all_tags})
+
     clip_results = clip.analyze_image(data, candidate_names)
 
     return ClipAnalyzeResponse(

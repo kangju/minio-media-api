@@ -3,6 +3,8 @@
 実際の Docker CLIP サービスを使用してテストを行う（モックなし）。
 """
 
+import json
+
 import pytest
 
 from tests.conftest import MINIMAL_JPEG, MINIMAL_MP4, make_upload_file
@@ -113,6 +115,79 @@ class TestClipEndpoint:
                 "/clip/analyze",
                 files=[("file", ("big.jpg", io.BytesIO(large_data), "image/jpeg"))],
             )
+        assert r.status_code == 422
+
+    def test_analyze_with_candidates_json(self, client):
+        """ケース10: candidates JSON を指定すると指定タグのみで解析される。"""
+        candidate_tags = ["cat", "dog", "animal"]
+        r = client.post(
+            "/clip/analyze",
+            files=[make_upload_file(MINIMAL_JPEG, "test.jpg", "image/jpeg")],
+            data={"candidates": json.dumps(candidate_tags)},
+        )
+        assert r.status_code == 200
+        returned_names = {tag["name"] for tag in r.json()["tags"]}
+        # 返されたタグはすべて指定した candidates 内に含まれること
+        assert returned_names.issubset(set(candidate_tags))
+
+    def test_analyze_with_invalid_json_candidates_422(self, client):
+        """ケース11: 不正な JSON を candidates に指定すると 422 になる。"""
+        r = client.post(
+            "/clip/analyze",
+            files=[make_upload_file(MINIMAL_JPEG, "test.jpg", "image/jpeg")],
+            data={"candidates": "not-valid-json"},
+        )
+        assert r.status_code == 422
+
+    def test_analyze_with_non_array_json_candidates_422(self, client):
+        """ケース12: JSON 配列以外（オブジェクト）を candidates に指定すると 422 になる。"""
+        r = client.post(
+            "/clip/analyze",
+            files=[make_upload_file(MINIMAL_JPEG, "test.jpg", "image/jpeg")],
+            data={"candidates": json.dumps({"tag": "cat"})},
+        )
+        assert r.status_code == 422
+
+    def test_analyze_with_empty_candidates(self, client):
+        """ケース13: 空配列を candidates に指定すると結果は空リストになる。"""
+        r = client.post(
+            "/clip/analyze",
+            files=[make_upload_file(MINIMAL_JPEG, "test.jpg", "image/jpeg")],
+            data={"candidates": json.dumps([])},
+        )
+        assert r.status_code == 200
+        assert r.json()["tags"] == []
+
+    def test_analyze_without_candidates_uses_db_tags(self, client):
+        """ケース14: candidates 未指定の場合は DB 全タグを候補として解析する（後方互換）。
+
+        conftest の autouse ``clean_db`` フィクスチャがテストごとに DB をリセットするため、
+        他テストで登録したタグが混入することはなく、テスト独立性は保証される。
+        """
+        # DB にタグを作成しておく
+        client.post("/tags", json={"name": "landscape"})
+        client.post("/tags", json={"name": "portrait"})
+
+        # DB の全タグ名を取得
+        tags_res = client.get("/tags")
+        db_tag_names = {t["name"] for t in tags_res.json()}
+
+        r = client.post(
+            "/clip/analyze",
+            files=[make_upload_file(MINIMAL_JPEG, "test.jpg", "image/jpeg")],
+        )
+        assert r.status_code == 200
+        returned_names = {tag["name"] for tag in r.json()["tags"]}
+        # 返却タグはすべて DB 登録済みタグの範囲内に収まること
+        assert returned_names.issubset(db_tag_names)
+
+    def test_analyze_with_non_string_elements_422(self, client):
+        """ケース15: candidates に文字列以外の要素が含まれると 422 になる。"""
+        r = client.post(
+            "/clip/analyze",
+            files=[make_upload_file(MINIMAL_JPEG, "test.jpg", "image/jpeg")],
+            data={"candidates": json.dumps(["cat", 123, None])},
+        )
         assert r.status_code == 422
 
 
