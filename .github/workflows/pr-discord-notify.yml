@@ -1,0 +1,132 @@
+name: PR Check Complete - Discord Notify
+
+on:
+  check_suite:
+    types: [completed]
+  check_run:
+    types: [completed]
+
+jobs:
+  notify-discord:
+    runs-on: ubuntu-latest
+    # PRに関連するcheck_suiteのみ対象
+    if: >
+      (github.event_name == 'check_suite' && github.event.check_suite.pull_requests[0] != null) ||
+      (github.event_name == 'check_run' && github.event.check_run.check_suite.pull_requests[0] != null)
+
+    steps:
+      - name: Set variables
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "check_suite" ]; then
+            echo "conclusion=${{ github.event.check_suite.conclusion }}" >> $GITHUB_OUTPUT
+            echo "pr_number=${{ github.event.check_suite.pull_requests[0].number }}" >> $GITHUB_OUTPUT
+            echo "pr_url=${{ github.event.check_suite.pull_requests[0].url }}" >> $GITHUB_OUTPUT
+            echo "head_sha=${{ github.event.check_suite.head_sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "conclusion=${{ github.event.check_run.conclusion }}" >> $GITHUB_OUTPUT
+            echo "pr_number=${{ github.event.check_run.check_suite.pull_requests[0].number }}" >> $GITHUB_OUTPUT
+            echo "pr_url=${{ github.event.check_run.check_suite.pull_requests[0].url }}" >> $GITHUB_OUTPUT
+            echo "head_sha=${{ github.event.check_run.head_sha }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get PR details
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = ${{ steps.vars.outputs.pr_number }};
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            core.setOutput('title', pr.title);
+            core.setOutput('html_url', pr.html_url);
+            core.setOutput('user', pr.user.login);
+            core.setOutput('base', pr.base.ref);
+            core.setOutput('head', pr.head.ref);
+
+      - name: Determine color and emoji
+        id: style
+        run: |
+          CONCLUSION="${{ steps.vars.outputs.conclusion }}"
+          if [ "$CONCLUSION" = "success" ]; then
+            echo "color=3066993" >> $GITHUB_OUTPUT   # green
+            echo "emoji=✅" >> $GITHUB_OUTPUT
+            echo "status=成功" >> $GITHUB_OUTPUT
+          elif [ "$CONCLUSION" = "failure" ]; then
+            echo "color=15158332" >> $GITHUB_OUTPUT  # red
+            echo "emoji=❌" >> $GITHUB_OUTPUT
+            echo "status=失敗" >> $GITHUB_OUTPUT
+          elif [ "$CONCLUSION" = "cancelled" ]; then
+            echo "color=9807270" >> $GITHUB_OUTPUT   # gray
+            echo "emoji=⏹️" >> $GITHUB_OUTPUT
+            echo "status=キャンセル" >> $GITHUB_OUTPUT
+          else
+            echo "color=16776960" >> $GITHUB_OUTPUT  # yellow
+            echo "emoji=⚠️" >> $GITHUB_OUTPUT
+            echo "status=$CONCLUSION" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Discord notification
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          PR_URL="${{ steps.pr.outputs.html_url }}"
+          PR_TITLE="${{ steps.pr.outputs.title }}"
+          PR_NUMBER="${{ steps.vars.outputs.pr_number }}"
+          PR_USER="${{ steps.pr.outputs.user }}"
+          BASE="${{ steps.pr.outputs.base }}"
+          HEAD="${{ steps.pr.outputs.head }}"
+          CONCLUSION="${{ steps.vars.outputs.conclusion }}"
+          COLOR="${{ steps.style.outputs.color }}"
+          EMOJI="${{ steps.style.outputs.emoji }}"
+          STATUS="${{ steps.style.outputs.status }}"
+          REPO="${{ github.repository }}"
+          SHA="${{ steps.vars.outputs.head_sha }}"
+          SHORT_SHA="${SHA:0:7}"
+
+          PAYLOAD=$(cat <<EOF
+          {
+            "embeds": [
+              {
+                "title": "${EMOJI} PR #${PR_NUMBER} のチェックが完了しました",
+                "description": "[${PR_TITLE}](${PR_URL})",
+                "color": ${COLOR},
+                "fields": [
+                  {
+                    "name": "📊 結果",
+                    "value": "${STATUS}",
+                    "inline": true
+                  },
+                  {
+                    "name": "👤 作成者",
+                    "value": "${PR_USER}",
+                    "inline": true
+                  },
+                  {
+                    "name": "🔀 ブランチ",
+                    "value": "\`${HEAD}\` → \`${BASE}\`",
+                    "inline": false
+                  },
+                  {
+                    "name": "🔗 コミット",
+                    "value": "[\`${SHORT_SHA}\`](https://github.com/${REPO}/commit/${SHA})",
+                    "inline": true
+                  }
+                ],
+                "footer": {
+                  "text": "${REPO}"
+                },
+                "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              }
+            ]
+          }
+          EOF
+          )
+
+          curl -s -o /dev/null -w "%{http_code}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "$DISCORD_WEBHOOK"
