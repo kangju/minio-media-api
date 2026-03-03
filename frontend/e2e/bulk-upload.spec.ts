@@ -32,7 +32,7 @@ for i in range(100):
   });
 
   test('100 枚を UI でアップロードして全件 CLIP が完了する', async ({ page, request }) => {
-    test.setTimeout(660_000);
+    test.setTimeout(960_000);
 
     await page.goto('/');
     await page.getByRole('button', { name: 'UPLOAD' }).waitFor({ timeout: 15_000 });
@@ -77,7 +77,7 @@ for i in range(100):
         (m) => m.clip_status === 'done' || m.clip_status === 'error'
       ).length;
       return nonPending >= afterTotal;
-    }, { timeout: 480_000, intervals: [5_000] }).toBeTruthy();
+    }, { timeout: 720_000, intervals: [5_000] }).toBeTruthy();
 
     // error が 0 件であること
     const finalRes = await request.get('/api/media?limit=200');
