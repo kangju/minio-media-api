@@ -32,7 +32,7 @@ open('${testFilePath}', 'wb').write(buf.getvalue())
 
   test('アップロード直後は clip_status が pending になる', async ({ page, request }) => {
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: 'UPLOAD' }).waitFor({ timeout: 15_000 });
 
     await page.getByRole('button', { name: 'UPLOAD' }).click();
     await page.waitForSelector('text=UPLOAD MEDIA');
@@ -42,9 +42,9 @@ open('${testFilePath}', 'wb').write(buf.getvalue())
       page.locator('text=ファイルをドロップ、またはクリックして選択').click(),
     ]);
     await fileChooser.setFiles(testFilePath);
-    await page.waitForTimeout(500);
-
     const uploadBtn = page.getByRole('button', { name: /^UPLOAD/ }).last();
+    await expect(uploadBtn).toBeEnabled();
+
     await uploadBtn.click();
 
     // モーダルが閉じるまで待機（20秒以内）

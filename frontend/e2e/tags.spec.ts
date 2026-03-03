@@ -1,9 +1,24 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+
+const tagsListResponse = (page: Page) =>
+  page.waitForResponse((res) => {
+    const url = new URL(res.url());
+    return url.pathname === '/api/tags' && res.request().method() === 'GET' && res.ok();
+  });
+
+const tagsMutateResponse = (page: Page, method: 'POST' | 'PATCH' | 'DELETE', okOnly = true) =>
+  page.waitForResponse((res) => {
+    const url = new URL(res.url());
+    return (
+      url.pathname.startsWith('/api/tags') &&
+      res.request().method() === method &&
+      (okOnly ? res.ok() : true)
+    );
+  });
 
 test.describe('タグ管理ページ基本表示', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/tags');
-    await page.waitForLoadState('networkidle');
+    await Promise.all([tagsListResponse(page), page.goto('/tags')]);
   });
 
   test('TAGSページが表示される', async ({ page }) => {
@@ -40,21 +55,21 @@ test.describe('タグ CRUD 操作', () => {
   const renamedTagName = `e2e-tag-renamed-${Date.now()}`;
 
   test('新規タグを作成できる', async ({ page }) => {
-    await page.goto('/tags');
-    await page.waitForLoadState('networkidle');
+    await Promise.all([tagsListResponse(page), page.goto('/tags')]);
 
     const input = page.locator('[data-testid="new-tag-input"]');
     await input.fill(testTagName);
-    await page.locator('[data-testid="add-tag-btn"]').click();
+    await Promise.all([
+      tagsMutateResponse(page, 'POST'),
+      page.locator('[data-testid="add-tag-btn"]').click(),
+    ]);
 
     // 作成後にタグが一覧に現れる
-    await page.waitForTimeout(1000);
     await expect(page.locator(`text=${testTagName}`)).toBeVisible();
   });
 
   test('作成したタグを編集できる', async ({ page }) => {
-    await page.goto('/tags');
-    await page.waitForLoadState('networkidle');
+    await Promise.all([tagsListResponse(page), page.goto('/tags')]);
 
     // 対象タグの行を探す
     const rows = page.locator('[data-testid^="tag-row-"]');
@@ -75,8 +90,10 @@ test.describe('タグ CRUD 操作', () => {
 
         // 保存
         const saveBtns = page.locator('[data-testid^="save-tag-btn-"]');
-        await saveBtns.first().click();
-        await page.waitForTimeout(1000);
+        await Promise.all([
+          tagsMutateResponse(page, 'PATCH'),
+          saveBtns.first().click(),
+        ]);
 
         await expect(page.locator(`text=${renamedTagName}`)).toBeVisible();
         break;
@@ -85,8 +102,7 @@ test.describe('タグ CRUD 操作', () => {
   });
 
   test('空名でタグを作成しようとするとエラー', async ({ page }) => {
-    await page.goto('/tags');
-    await page.waitForLoadState('networkidle');
+    await Promise.all([tagsListResponse(page), page.goto('/tags')]);
 
     const addBtn = page.locator('[data-testid="add-tag-btn"]');
     // 入力なしでボタンが無効になっているか確認
@@ -95,8 +111,7 @@ test.describe('タグ CRUD 操作', () => {
   });
 
   test('作成したタグを削除できる', async ({ page }) => {
-    await page.goto('/tags');
-    await page.waitForLoadState('networkidle');
+    await Promise.all([tagsListResponse(page), page.goto('/tags')]);
 
     // renamedTagName または testTagName を削除
     const rows = page.locator('[data-testid^="tag-row-"]');
@@ -111,8 +126,10 @@ test.describe('タグ CRUD 操作', () => {
 
         // confirm ダイアログを受け入れる
         page.on('dialog', (dialog) => dialog.accept());
-        await deleteBtn.click();
-        await page.waitForTimeout(1000);
+        await Promise.all([
+          tagsMutateResponse(page, 'DELETE'),
+          deleteBtn.click(),
+        ]);
 
         // タグが消えていることを確認
         await expect(page.locator(`text=${renamedTagName}`)).not.toBeVisible();
@@ -122,20 +139,23 @@ test.describe('タグ CRUD 操作', () => {
   });
 
   test('同名タグを作成するとエラーメッセージが出る', async ({ page }) => {
-    await page.goto('/tags');
-    await page.waitForLoadState('networkidle');
+    await Promise.all([tagsListResponse(page), page.goto('/tags')]);
 
     // まず1つ作成
     const dupTagName = `e2e-dup-${Date.now()}`;
     const input = page.locator('[data-testid="new-tag-input"]');
     await input.fill(dupTagName);
-    await page.locator('[data-testid="add-tag-btn"]').click();
-    await page.waitForTimeout(1000);
+    await Promise.all([
+      tagsMutateResponse(page, 'POST'),
+      page.locator('[data-testid="add-tag-btn"]').click(),
+    ]);
 
     // 同名を再度作成
     await input.fill(dupTagName);
-    await page.locator('[data-testid="add-tag-btn"]').click();
-    await page.waitForTimeout(1000);
+    await Promise.all([
+      tagsMutateResponse(page, 'POST', false),
+      page.locator('[data-testid="add-tag-btn"]').click(),
+    ]);
 
     // エラーメッセージが表示される
     await expect(page.locator('[data-testid="error-message"]').or(
@@ -151,8 +171,10 @@ test.describe('タグ CRUD 操作', () => {
       if (text?.includes(dupTagName)) {
         const deleteBtns = page.locator('[data-testid^="delete-tag-btn-"]');
         page.on('dialog', (dialog) => dialog.accept());
-        await deleteBtns.nth(i).click();
-        await page.waitForTimeout(500);
+        await Promise.all([
+          tagsMutateResponse(page, 'DELETE'),
+          deleteBtns.nth(i).click(),
+        ]);
         break;
       }
     }
@@ -161,8 +183,7 @@ test.describe('タグ CRUD 操作', () => {
 
 test.describe('ヘッダーナビゲーション（TAGSページから）', () => {
   test('GALLERYリンクでギャラリーに移動できる', async ({ page }) => {
-    await page.goto('/tags');
-    await page.waitForLoadState('networkidle');
+    await Promise.all([tagsListResponse(page), page.goto('/tags')]);
     // HeaderのGALLERYリンクをクリック
     await page.locator('a', { hasText: 'GALLERY' }).click();
     await page.waitForURL('/');

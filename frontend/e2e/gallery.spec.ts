@@ -91,7 +91,18 @@ test.describe('無限スクロール', () => {
     const before = await page.locator('img').count();
 
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await page.waitForTimeout(2000);
+    await page.waitForResponse(
+      (res) => {
+        const url = new URL(res.url());
+        return (
+          url.pathname === '/api/media' &&
+          res.request().method() === 'GET' &&
+          res.ok() &&
+          parseInt(url.searchParams.get('offset') || '0') > 0
+        );
+      },
+      { timeout: 3_000 }
+    ).catch(() => {});
 
     const after = await page.locator('img').count();
     expect(after).toBeGreaterThanOrEqual(before);
@@ -152,7 +163,6 @@ test.describe('SELECT モード', () => {
   test('SELECT ボタンでセレクトモードになる', async ({ page }) => {
     await page.getByRole('button', { name: 'SELECT', exact: true }).click();
     await page.locator('img').first().click();
-    await page.waitForTimeout(500);
     await expect(page.getByRole('button', { name: /DELETE SELECTED/i })).toBeVisible();
   });
 
@@ -167,7 +177,6 @@ test.describe('SELECT モード', () => {
     const selectAllBtn = page.getByRole('button', { name: /SELECT ALL/i });
     if (await selectAllBtn.count() > 0) {
       await selectAllBtn.click();
-      await page.waitForTimeout(500);
       // DELETE SELECTED が表示される（何かが選択されている）
       await expect(page.getByRole('button', { name: /DELETE SELECTED/i })).toBeVisible();
     }

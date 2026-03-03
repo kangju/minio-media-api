@@ -18,7 +18,7 @@ const mediaApiResponse = (
 test.describe('フィルターパネル表示', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.waitForSelector('img', { timeout: 15_000 });
+    await page.locator('[data-testid="media-type-select"]').waitFor({ timeout: 15_000 });
   });
 
   test('フィルターパネルが表示される', async ({ page }) => {
@@ -49,7 +49,7 @@ test.describe('フィルターパネル表示', () => {
 test.describe('メディアタイプフィルタ', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.waitForSelector('img', { timeout: 15_000 });
+    await page.locator('[data-testid="media-type-select"]').waitFor({ timeout: 15_000 });
   });
 
   test('「画像」を選択すると画像のみ表示される', async ({ page }) => {
@@ -78,6 +78,8 @@ test.describe('メディアタイプフィルタ', () => {
 
   test('「すべて」に戻すと全件表示', async ({ page }) => {
     const select = page.locator('[data-testid="media-type-select"]');
+    // 初期メディア一覧の描画を待ってからベースライン件数を取得（0件環境はタイムアウトを無視）
+    await page.locator('img').first().waitFor({ timeout: 10_000 }).catch(() => {});
     const beforeCount = await page.locator('img').count();
 
     await Promise.all([
@@ -97,7 +99,7 @@ test.describe('メディアタイプフィルタ', () => {
 test.describe('削除済み含むフィルタ', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.waitForSelector('img', { timeout: 15_000 });
+    await page.locator('[data-testid="media-type-select"]').waitFor({ timeout: 15_000 });
   });
 
   test('チェックをONにするとAPIが include_deleted=true で呼ばれる', async ({ page }) => {
@@ -129,7 +131,7 @@ test.describe('削除済み含むフィルタ', () => {
 test.describe('作成日フィルタ', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.waitForSelector('img', { timeout: 15_000 });
+    await page.locator('[data-testid="media-type-select"]').waitFor({ timeout: 15_000 });
   });
 
   test('未来日付の created_from を設定すると0件になる', async ({ page }) => {
@@ -173,7 +175,7 @@ test.describe('作成日フィルタ', () => {
 test.describe('フィルターリセット', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.waitForSelector('img', { timeout: 15_000 });
+    await page.locator('[data-testid="media-type-select"]').waitFor({ timeout: 15_000 });
   });
 
   test('リセットボタンで全フィルターがクリアされる', async ({ page }) => {
@@ -203,7 +205,7 @@ test.describe('フィルターリセット', () => {
 test.describe('タグフィルタポップアップ', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.waitForSelector('img', { timeout: 15_000 });
+    await page.locator('[data-testid="media-type-select"]').waitFor({ timeout: 15_000 });
   });
 
   test('タグがあればポップアップボタンが表示される', async ({ page }) => {
@@ -276,7 +278,7 @@ test.describe('タグフィルタポップアップ', () => {
 test.describe('ナビゲーション（ギャラリーからタグページ）', () => {
   test('TAGSリンクでタグページに移動できる', async ({ page }) => {
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: 'UPLOAD' }).waitFor({ timeout: 15_000 });
     await page.locator('a', { hasText: 'TAGS' }).click();
     await page.waitForURL('/tags');
     await expect(page).toHaveURL('/tags');
@@ -287,7 +289,7 @@ test.describe('ナビゲーション（ギャラリーからタグページ）',
 test.describe('ソート機能', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.waitForSelector('img', { timeout: 15_000 });
+    await page.locator('[data-testid="media-type-select"]').waitFor({ timeout: 15_000 });
   });
 
   test('ソートフィールドセレクトが表示される', async ({ page }) => {
@@ -342,10 +344,20 @@ test.describe('ソート機能', () => {
       mediaApiResponse(page, (u) => u.searchParams.get('sort_by') === 'created_at'),
       sortBySelect.selectOption('created_at'),
     ]);
-    const [finalRes] = await Promise.all([
-      mediaApiResponse(page, (u) => u.searchParams.get('sort_by') === 'original_filename'),
+    const [step3Request] = await Promise.all([
+      page.waitForRequest((req) => {
+        if (req.url().match(/\/api\/media\/\d+/)) return false;
+        const url = new URL(req.url());
+        return (
+          url.pathname === '/api/media' &&
+          req.method() === 'GET' &&
+          url.searchParams.get('sort_by') === 'original_filename'
+        );
+      }),
       sortBySelect.selectOption('original_filename'),
     ]);
+    const finalRes = await step3Request.response();
+    expect(finalRes).not.toBeNull();
 
     // 最終選択値が反映されていることを確認
     await expect(sortBySelect).toHaveValue('original_filename');
@@ -359,7 +371,7 @@ test.describe('ソート機能', () => {
     // DOM と API が一致しない場合、競合レスポンスによる表示順崩れを検知できる。
 
     // レスポンスから先頭ファイル名を取得し、DOM の再レンダリング完了を待機する
-    const finalData = await finalRes.json();
+    const finalData = await finalRes!.json();
     const firstExpectedFilename: string | undefined = finalData.items[0]?.original_filename;
     if (firstExpectedFilename) {
       await expect(page.locator('[data-filename]').first()).toHaveAttribute(
@@ -457,16 +469,17 @@ test.describe('フィルタ変更直後スクロール競合テスト (#24)', ()
       req.url().includes('media_type=image') &&
       !req.url().match(/\/api\/media\/\d+/)
     );
+    const imageFilterResponsePromise = mediaApiResponse(
+      page, (u) => u.searchParams.get('media_type') === 'image'
+    );
 
     collecting = true;
     await page.locator('[data-testid="media-type-select"]').selectOption('image');
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
 
-    // フィルタ変更後の media_type=image リクエストを待機
+    // フィルタ変更後の media_type=image リクエスト・レスポンスを待機
     await imageFilterRequestPromise;
-
-    // 遅れて発火する旧条件リクエストも収集できるよう、フィルタ変更後のレスポンスを待機してから検証する
-    await mediaApiResponse(page, (u) => u.searchParams.get('media_type') === 'image');
+    await imageFilterResponsePromise;
 
     // 検証1: フィルタ変更後に media_type=image + offset=0 のリクエストが ≥1 回あること（テスト意図の明示）
     const initialFilterRequests = postFilterRequests.filter(

@@ -35,7 +35,7 @@ for i in range(100):
     test.setTimeout(300_000);
 
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: 'UPLOAD' }).waitFor({ timeout: 15_000 });
 
     // アップロード前のメディア件数を取得
     const beforeRes = await request.get('http://localhost:3000/api/media?limit=1');
@@ -52,10 +52,9 @@ for i in range(100):
       page.locator('text=ファイルをドロップ、またはクリックして選択').click(),
     ]);
     await fileChooser.setFiles(testFiles);
-    await page.waitForTimeout(1_000);
-
     // UPLOAD ボタン押下
     const uploadBtn = page.getByRole('button', { name: /^UPLOAD/ }).last();
+    await expect(uploadBtn).toBeEnabled();
     await uploadBtn.click();
 
     // モーダルが閉じるまで待機（アップロード完了、最大 120 秒）
