@@ -38,7 +38,7 @@ for i in range(100):
     await page.getByRole('button', { name: 'UPLOAD' }).waitFor({ timeout: 15_000 });
 
     // アップロード前のメディア件数を取得
-    const beforeRes = await request.get('http://localhost:3000/api/media?limit=1');
+    const beforeRes = await request.get('/api/media?limit=1');
     const beforeData = await beforeRes.json();
     const beforeTotal = beforeData.total as number;
 
@@ -61,14 +61,14 @@ for i in range(100):
     await page.waitForSelector('text=UPLOAD MEDIA', { state: 'hidden', timeout: 120_000 });
 
     // アップロード後の件数確認
-    const afterRes = await request.get(`http://localhost:3000/api/media?limit=1`);
+    const afterRes = await request.get('/api/media?limit=1');
     const afterData = await afterRes.json();
     const afterTotal = afterData.total as number;
     expect(afterTotal).toBeGreaterThan(beforeTotal);
 
     // 全件 clip_status が done になるまでポーリング（最大 180 秒）
     await expect.poll(async () => {
-      const res = await request.get(`http://localhost:3000/api/media?limit=200`);
+      const res = await request.get('/api/media?limit=200');
       if (!res.ok()) return false;
       const data = await res.json();
       const items = data.items as Array<{ clip_status: string }>;
@@ -80,7 +80,7 @@ for i in range(100):
     }, { timeout: 180_000, intervals: [5_000] }).toBeTruthy();
 
     // error が 0 件であること
-    const finalRes = await request.get('http://localhost:3000/api/media?limit=200');
+    const finalRes = await request.get('/api/media?limit=200');
     const finalData = await finalRes.json();
     const errorCount = (finalData.items as Array<{ clip_status: string }>).filter(
       (m) => m.clip_status === 'error'
