@@ -106,6 +106,15 @@ jobs:
       E2E_MINIO_PASSWORD: ci_e2e_minio_password
     steps:
       - uses: actions/checkout@v4
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet \
+                      /usr/local/lib/android \
+                      /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL \
+                      /usr/local/share/boost \
+                      "$AGENT_TOOLSDIRECTORY"
+          df -h
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -151,6 +160,15 @@ jobs:
       E2E_MINIO_PASSWORD: ci_e2e_minio_password
     steps:
       - uses: actions/checkout@v4
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet \
+                      /usr/local/lib/android \
+                      /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL \
+                      /usr/local/share/boost \
+                      "$AGENT_TOOLSDIRECTORY"
+          df -h
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
