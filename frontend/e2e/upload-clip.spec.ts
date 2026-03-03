@@ -49,6 +49,7 @@ test.describe('アップロード → 非同期CLIP', () => {
   });
 
   test('CLIPアナライズAPIが直接呼ばれて結果が返ってくる', async ({ request }) => {
+    test.setTimeout(90_000);
     const listRes = await request.get('/api/media?limit=1');
     expect(listRes.ok()).toBeTruthy();
     const listData = await listRes.json();

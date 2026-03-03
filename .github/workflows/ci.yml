@@ -128,7 +128,18 @@ jobs:
       - name: Install Python dependencies
         run: pip install pillow
       - name: Start E2E services
-        run: docker compose -f docker-compose.test.yml up -d --build api-server-test frontend-e2e clip-worker-e2e
+        run: |
+          for attempt in 1 2 3; do
+            echo "=== Attempt $attempt ==="
+            docker compose -f docker-compose.test.yml up -d --build \
+              api-server-test frontend-e2e clip-worker-e2e \
+              && curl --retry 10 --retry-delay 3 --retry-connrefused \
+                       --max-time 60 -sf http://localhost:3001 \
+              && break
+            echo "Attempt $attempt failed. Tearing down and retrying in 15s..."
+            docker compose -f docker-compose.test.yml down -v 2>/dev/null || true
+            sleep 15
+          done
       - name: Wait for frontend
         run: |
           for i in $(seq 1 30); do
@@ -182,7 +193,18 @@ jobs:
       - name: Install Python dependencies
         run: pip install pillow
       - name: Start E2E services
-        run: docker compose -f docker-compose.test.yml up -d --build api-server-test frontend-e2e clip-worker-e2e
+        run: |
+          for attempt in 1 2 3; do
+            echo "=== Attempt $attempt ==="
+            docker compose -f docker-compose.test.yml up -d --build \
+              api-server-test frontend-e2e clip-worker-e2e \
+              && curl --retry 10 --retry-delay 3 --retry-connrefused \
+                       --max-time 60 -sf http://localhost:3001 \
+              && break
+            echo "Attempt $attempt failed. Tearing down and retrying in 15s..."
+            docker compose -f docker-compose.test.yml down -v 2>/dev/null || true
+            sleep 15
+          done
       - name: Wait for frontend
         run: |
           for i in $(seq 1 30); do
