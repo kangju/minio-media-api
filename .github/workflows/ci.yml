@@ -216,14 +216,16 @@ jobs:
       - name: Warm up CLIP model
         run: |
           # 最小の JPEG ファイルを作成（PIL 不要、標準ライブラリのみ使用）
-          python3 -c 'import base64; open("/tmp/warmup.jpg","wb").write(base64.b64decode("/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AJQAB/9k="))'
+          python3 -c 'import base64; open("/tmp/warmup.jpg","wb").write(base64.b64decode("/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AJQAB/9k="))' && echo "JPEG created: $(ls -la /tmp/warmup.jpg)" || echo "JPEG creation failed"
           # ダミー画像をアップロードして CLIP モデルのロードを事前に完了させる
-          UPLOAD_RESP=$(curl -sf -X POST http://localhost:3001/api/media \
-            -F "file=@/tmp/warmup.jpg" 2>/dev/null || echo "")
+          # -f を外してデバッグ情報を取得、MIME タイプを明示的に指定
+          UPLOAD_RESP=$(curl -s --max-time 30 -X POST http://localhost:3001/api/media \
+            -F "file=@/tmp/warmup.jpg;type=image/jpeg" 2>&1 || echo "curl_failed")
+          echo "Upload response: ${UPLOAD_RESP:0:200}"
           MEDIA_ID=$(echo "$UPLOAD_RESP" | python3 -c \
             "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
           if [ -z "$MEDIA_ID" ]; then
-            echo "Warmup upload failed (JPEG creation or API unavailable), continuing anyway"
+            echo "Warmup upload failed (API unavailable or rejected), continuing anyway"
           else
             echo "Warmup image uploaded: $MEDIA_ID"
             for i in $(seq 1 24); do

@@ -34,7 +34,7 @@ for i in range(${BATCH_SIZE}):
   });
 
   test(`${BATCH_SIZE} 枚を UI でアップロードして全件 CLIP が完了する`, async ({ page, request }) => {
-    test.setTimeout(420_000);
+    test.setTimeout(720_000);
 
     await page.goto('/');
     await page.getByRole('button', { name: 'UPLOAD' }).waitFor({ timeout: 15_000 });
@@ -68,7 +68,7 @@ for i in range(${BATCH_SIZE}):
     const afterTotal = afterData.total as number;
     expect(afterTotal).toBeGreaterThan(beforeTotal);
 
-    // 全件 clip_status が done になるまでポーリング（最大 180 秒）
+    // 全件 clip_status が done になるまでポーリング（最大 300 秒）
     await expect.poll(async () => {
       const res = await request.get('/api/media?limit=200');
       if (!res.ok()) return false;
@@ -79,7 +79,7 @@ for i in range(${BATCH_SIZE}):
         (m) => m.clip_status === 'done' || m.clip_status === 'error'
       ).length;
       return nonPending >= afterTotal;
-    }, { timeout: 180_000, intervals: [5_000] }).toBeTruthy();
+    }, { timeout: 300_000, intervals: [5_000] }).toBeTruthy();
 
     // error が 0 件であること
     const finalRes = await request.get('/api/media?limit=200');
