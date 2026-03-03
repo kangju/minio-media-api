@@ -14,7 +14,7 @@ test.describe('一括アップロード + CLIP 自動解析', () => {
   let tmpDir: string;
   let testFiles: string[];
 
-  const BATCH_SIZE = 20; // CI ランナーの CPU 速度に合わせて枚数を調整
+  const BATCH_SIZE = 10; // CI ランナーの CPU 速度に合わせて枚数を調整
 
   test.beforeAll(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bulk-test-'));
