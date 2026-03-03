@@ -216,12 +216,7 @@ jobs:
       - name: Warm up CLIP model
         run: |
           # ダミー画像をアップロードして CLIP モデルのロードを事前に完了させる
-          python3 -c "
-from PIL import Image; import io
-img = Image.new('RGB', (8, 8), color=(128, 64, 32))
-buf = io.BytesIO(); img.save(buf, 'JPEG')
-open('/tmp/warmup.jpg', 'wb').write(buf.getvalue())
-"
+          python3 -c 'from PIL import Image; import io; img=Image.new("RGB",(8,8),color=(128,64,32)); buf=io.BytesIO(); img.save(buf,"JPEG"); open("/tmp/warmup.jpg","wb").write(buf.getvalue())'
           UPLOAD_RESP=$(curl -sf -X POST http://localhost:3001/api/media \
             -F "file=@/tmp/warmup.jpg" 2>/dev/null || echo "")
           MEDIA_ID=$(echo "$UPLOAD_RESP" | python3 -c \
