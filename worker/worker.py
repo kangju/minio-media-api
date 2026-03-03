@@ -10,6 +10,7 @@ import signal
 from concurrent.futures import ThreadPoolExecutor
 
 import anyio
+import torch
 
 from config import settings
 from processor import claim_pending, load_model, reset_running, run_clip_task
@@ -39,6 +40,13 @@ async def _poll_loop(executor: ThreadPoolExecutor, stop_event: asyncio.Event) ->
 
 async def main() -> None:
     """ワーカーのメイン処理。"""
+    # PyTorch スレッドを1に固定（env 変数の補完。env が効かない場合の二重対策）
+    torch.set_num_threads(1)
+    logger.info(
+        "スレッド設定: torch_num_threads=1, max_concurrent=%d, poll_interval=%ds",
+        settings.clip_max_concurrent,
+        settings.clip_poll_interval,
+    )
     # CLIP モデルを起動時にロード（スレッドで実行してイベントループをブロックしない）
     logger.info("CLIP モデルをロード中...")
     await anyio.to_thread.run_sync(load_model)

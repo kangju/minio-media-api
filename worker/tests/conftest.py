@@ -77,7 +77,7 @@ def make_test_jpeg(r: int = 200, g: int = 100, b: int = 50) -> bytes:
 
 
 def insert_media(db_engine, minio_key: str = None, clip_status: str = "pending",
-                 retry_count: int = 0) -> int:
+                 retry_count: int = 0, file_hash: str = None) -> int:
     """テスト用メディアレコードを挿入して ID を返す。"""
     with db_engine.connect() as conn:
         row = conn.execute(
@@ -93,7 +93,7 @@ def insert_media(db_engine, minio_key: str = None, clip_status: str = "pending",
             {
                 "fname": "test.jpg",
                 "key": minio_key,
-                "hash": f"hash_{minio_key}_{retry_count}",
+                "hash": file_hash or f"hash_{minio_key}_{retry_count}",
                 "status": clip_status,
                 "retry": retry_count,
             },
