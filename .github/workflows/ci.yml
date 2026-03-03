@@ -213,6 +213,35 @@ jobs:
             curl -sf http://localhost:3001 && break || sleep 5
           done
           curl -sf http://localhost:3001 || { echo "frontend did not start in time"; exit 1; }
+      - name: Warm up CLIP model
+        run: |
+          # ダミー画像をアップロードして CLIP モデルのロードを事前に完了させる
+          python3 -c "
+from PIL import Image; import io
+img = Image.new('RGB', (8, 8), color=(128, 64, 32))
+buf = io.BytesIO(); img.save(buf, 'JPEG')
+open('/tmp/warmup.jpg', 'wb').write(buf.getvalue())
+"
+          UPLOAD_RESP=$(curl -sf -X POST http://localhost:3001/api/media \
+            -F "file=@/tmp/warmup.jpg" 2>/dev/null || echo "")
+          MEDIA_ID=$(echo "$UPLOAD_RESP" | python3 -c \
+            "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+          if [ -z "$MEDIA_ID" ]; then
+            echo "Warmup upload failed, continuing anyway"
+          else
+            echo "Warmup image uploaded: $MEDIA_ID"
+            for i in $(seq 1 24); do
+              STATUS=$(curl -sf "http://localhost:3001/api/media/$MEDIA_ID" 2>/dev/null | \
+                python3 -c \
+                "import sys,json; print(json.load(sys.stdin).get('clip_status',''))" 2>/dev/null || echo "")
+              if [ "$STATUS" = "done" ] || [ "$STATUS" = "error" ]; then
+                echo "CLIP warmup complete (status: $STATUS)"
+                break
+              fi
+              echo "Waiting for CLIP model... attempt $i (status: $STATUS)"
+              sleep 5
+            done
+          fi
       - name: Run Playwright (e2e-bulk-upload project)
         run: npx playwright test --project=e2e-bulk-upload
         working-directory: frontend
