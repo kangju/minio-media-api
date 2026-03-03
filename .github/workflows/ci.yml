@@ -215,14 +215,15 @@ jobs:
           curl -sf http://localhost:3001 || { echo "frontend did not start in time"; exit 1; }
       - name: Warm up CLIP model
         run: |
+          # 最小の JPEG ファイルを作成（PIL 不要、標準ライブラリのみ使用）
+          python3 -c 'import base64; open("/tmp/warmup.jpg","wb").write(base64.b64decode("/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AJQAB/9k="))'
           # ダミー画像をアップロードして CLIP モデルのロードを事前に完了させる
-          python3 -c 'from PIL import Image; import io; img=Image.new("RGB",(8,8),color=(128,64,32)); buf=io.BytesIO(); img.save(buf,"JPEG"); open("/tmp/warmup.jpg","wb").write(buf.getvalue())'
           UPLOAD_RESP=$(curl -sf -X POST http://localhost:3001/api/media \
             -F "file=@/tmp/warmup.jpg" 2>/dev/null || echo "")
           MEDIA_ID=$(echo "$UPLOAD_RESP" | python3 -c \
             "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
           if [ -z "$MEDIA_ID" ]; then
-            echo "Warmup upload failed, continuing anyway"
+            echo "Warmup upload failed (JPEG creation or API unavailable), continuing anyway"
           else
             echo "Warmup image uploaded: $MEDIA_ID"
             for i in $(seq 1 24); do
