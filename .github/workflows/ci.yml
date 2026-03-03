@@ -132,10 +132,11 @@ jobs:
           for attempt in 1 2 3; do
             echo "=== Attempt $attempt ==="
             docker compose -f docker-compose.test.yml up -d --build \
-              api-server-test frontend-e2e clip-worker-e2e \
-              && curl --retry 10 --retry-delay 3 --retry-connrefused \
-                       --max-time 60 -sf http://localhost:3001 \
-              && break
+              api-server-test frontend-e2e clip-worker-e2e && break
+            if [ "$attempt" = "3" ]; then
+              echo "All docker compose up attempts failed"
+              exit 1
+            fi
             echo "Attempt $attempt failed. Tearing down and retrying in 15s..."
             docker compose -f docker-compose.test.yml down -v 2>/dev/null || true
             sleep 15
@@ -197,10 +198,11 @@ jobs:
           for attempt in 1 2 3; do
             echo "=== Attempt $attempt ==="
             docker compose -f docker-compose.test.yml up -d --build \
-              api-server-test frontend-e2e clip-worker-e2e \
-              && curl --retry 10 --retry-delay 3 --retry-connrefused \
-                       --max-time 60 -sf http://localhost:3001 \
-              && break
+              api-server-test frontend-e2e clip-worker-e2e && break
+            if [ "$attempt" = "3" ]; then
+              echo "All docker compose up attempts failed"
+              exit 1
+            fi
             echo "Attempt $attempt failed. Tearing down and retrying in 15s..."
             docker compose -f docker-compose.test.yml down -v 2>/dev/null || true
             sleep 15
