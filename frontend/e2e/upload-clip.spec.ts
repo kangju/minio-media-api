@@ -79,11 +79,51 @@ test.describe('アップロード → 非同期CLIP', () => {
     expect(analyzeData.clip_status).toBe('done');
   });
 
-  test('CLIPタグはデフォルト語彙から生成されて新規DBタグが作られる', async ({ request }) => {
-    const tagsRes = await request.get('/api/tags');
-    expect(tagsRes.ok()).toBeTruthy();
-    const tags = await tagsRes.json();
-    expect(tags.length).toBeGreaterThanOrEqual(0);
+  test('analyze結果のclipタグがDBに反映される', async ({ request }) => {
+    // 未解析の画像を探す（clip_status !== 'done'）
+    const listRes = await request.get('/api/media?limit=50');
+    expect(listRes.ok()).toBeTruthy();
+    const listData = await listRes.json();
+
+    const pendingImage = listData.items.find(
+      (item: { media_type: string; clip_status: string }) =>
+        item.media_type === 'image' && item.clip_status !== 'done'
+    );
+    if (!pendingImage) {
+      test.skip(true, '未解析の画像が存在しないためスキップ');
+      return;
+    }
+
+    // analyze前: このメディアのCLIPタグIDを記録（未解析なので空のはず）
+    const beforeMediaRes = await request.get(`/api/media/${pendingImage.id}`);
+    expect(beforeMediaRes.ok()).toBeTruthy();
+    const beforeMedia = await beforeMediaRes.json();
+    const beforeClipIds = new Set(
+      (beforeMedia.tags ?? [])
+        .filter((t: { source: string }) => t.source === 'clip')
+        .map((t: { id: number }) => t.id)
+    );
+
+    // analyze実行
+    const analyzeRes = await request.post(`/api/media/${pendingImage.id}/analyze`, { data: {} });
+    expect(analyzeRes.ok()).toBeTruthy();
+    const analyzeData = await analyzeRes.json();
+
+    // analyzeレスポンスにCLIPタグが含まれること
+    const responseClipTags: Array<{ id: number; source: string }> = analyzeData.tags.filter(
+      (t: { source: string }) => t.source === 'clip'
+    );
+    expect(responseClipTags.length).toBeGreaterThan(0);
+
+    // analyze後: このメディアを再取得し、CLIPタグが追加されたことを確認（因果検証）
+    const afterMediaRes = await request.get(`/api/media/${pendingImage.id}`);
+    expect(afterMediaRes.ok()).toBeTruthy();
+    const afterMedia = await afterMediaRes.json();
+    const newClipTagsForMedia = (afterMedia.tags ?? []).filter(
+      (t: { source: string; id: number }) =>
+        t.source === 'clip' && !beforeClipIds.has(t.id)
+    );
+    expect(newClipTagsForMedia.length).toBeGreaterThan(0);
   });
 
   test('CLIP ANALYZEボタンがライトボックスに表示される', async ({ page }) => {
@@ -104,7 +144,10 @@ test.describe('アップロード → 非同期CLIP', () => {
     // まずmediaIdを取得
     const listRes = await request.get('/api/media?limit=1');
     const listData = await listRes.json();
-    if (listData.total === 0) return;
+    if (listData.total === 0) {
+      test.skip(true, 'メディアが存在しないためスキップ');
+      return;
+    }
     const mediaId = listData.items[0].id;
 
     const analyzeBtn = page.getByRole('button', { name: /CLIP ANALYZE/i });
@@ -123,9 +166,8 @@ test.describe('アップロード → 非同期CLIP', () => {
 
     // APIでclip_status確認
     const mediaRes = await request.get(`/api/media/${mediaId}`);
-    if (mediaRes.ok()) {
-      const mediaData = await mediaRes.json();
-      expect(mediaData.clip_status).toBe('done');
-    }
+    expect(mediaRes.ok()).toBeTruthy();
+    const mediaData = await mediaRes.json();
+    expect(mediaData.clip_status).toBe('done');
   });
 });
