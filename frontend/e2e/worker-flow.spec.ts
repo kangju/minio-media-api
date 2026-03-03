@@ -13,6 +13,7 @@ import { execSync } from 'child_process';
 test.describe('clip-worker 非同期解析フロー', () => {
   let tmpDir: string;
   let testFilePath: string;
+  let uploadedMediaId: number | null = null;
 
   test.beforeAll(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-test-'));
@@ -51,19 +52,21 @@ open('${testFilePath}', 'wb').write(buf.getvalue())
     await page.waitForSelector('text=UPLOAD MEDIA', { state: 'hidden', timeout: 20_000 });
 
     // 最新のメディアを取得して clip_status を確認
-    const listRes = await request.get('http://localhost:3000/api/media?limit=1');
+    const listRes = await request.get('/api/media?limit=1');
     expect(listRes.ok()).toBeTruthy();
     const listData = await listRes.json();
     expect(listData.total).toBeGreaterThan(0);
 
     const latestMedia = listData.items[0];
+    uploadedMediaId = latestMedia.id;
     // アップロード直後は pending か running（worker が処理中の可能性）
     expect(['pending', 'running', 'done']).toContain(latestMedia.clip_status);
   });
 
   test('clip-worker が 60 秒以内に CLIP 解析を完了する', async ({ request }) => {
+    test.setTimeout(90_000);
     // 最新のメディアが done になるまでポーリング
-    const listRes = await request.get('http://localhost:3000/api/media?limit=1');
+    const listRes = await request.get('/api/media?limit=1');
     expect(listRes.ok()).toBeTruthy();
     const listData = await listRes.json();
 
@@ -72,10 +75,10 @@ open('${testFilePath}', 'wb').write(buf.getvalue())
       return;
     }
 
-    const mediaId = listData.items[0].id;
+    const mediaId = uploadedMediaId ?? listData.items[0].id;
 
     await expect.poll(async () => {
-      const res = await request.get(`http://localhost:3000/api/media/${mediaId}`);
+      const res = await request.get(`/api/media/${mediaId}`);
       if (!res.ok()) return 'error';
       const data = await res.json();
       return data.clip_status;
