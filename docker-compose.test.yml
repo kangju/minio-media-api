@@ -174,7 +174,7 @@ services:
       CLIP_SCORE_THRESHOLD: "0.2"
       CLIP_TOP_K: "10"
     volumes:
-      - model_test_cache:/root/.cache
+      - clip_worker_e2e_model_cache:/root/.cache
     restart: unless-stopped
 
   frontend-e2e:
@@ -191,3 +191,4 @@ volumes:
   postgres_test_data:
   postgres_e2e_data:
   model_test_cache:
+  clip_worker_e2e_model_cache:
