@@ -1,5 +1,20 @@
 import { test, expect } from '@playwright/test';
 
+/** /api/media 一覧エンドポイントのレスポンスを待機するヘルパー */
+const mediaApiResponse = (
+  page: import('@playwright/test').Page,
+  extraCheck?: (url: URL) => boolean
+) =>
+  page.waitForResponse((res) => {
+    const url = new URL(res.url());
+    return (
+      url.pathname === '/api/media' &&
+      res.request().method() === 'GET' &&
+      res.ok() &&
+      (!extraCheck || extraCheck(url))
+    );
+  });
+
 test.describe('フィルターパネル表示', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
@@ -54,8 +69,10 @@ test.describe('メディアタイプフィルタ', () => {
 
   test('「動画」を選択するとアイテム数が変わる', async ({ page }) => {
     const select = page.locator('[data-testid="media-type-select"]');
-    await select.selectOption('video');
-    await page.waitForTimeout(1000);
+    await Promise.all([
+      mediaApiResponse(page, (u) => u.searchParams.get('media_type') === 'video'),
+      select.selectOption('video'),
+    ]);
     await expect(page.locator('[data-testid="filter-panel"]')).toBeVisible();
   });
 
@@ -63,10 +80,14 @@ test.describe('メディアタイプフィルタ', () => {
     const select = page.locator('[data-testid="media-type-select"]');
     const beforeCount = await page.locator('img').count();
 
-    await select.selectOption('image');
-    await page.waitForTimeout(500);
-    await select.selectOption('');
-    await page.waitForTimeout(1000);
+    await Promise.all([
+      mediaApiResponse(page, (u) => u.searchParams.get('media_type') === 'image'),
+      select.selectOption('image'),
+    ]);
+    await Promise.all([
+      mediaApiResponse(page, (u) => !u.searchParams.has('media_type')),
+      select.selectOption(''),
+    ]);
 
     const afterCount = await page.locator('img').count();
     expect(afterCount).toBe(beforeCount);
@@ -93,10 +114,14 @@ test.describe('削除済み含むフィルタ', () => {
 
   test('チェックをOFFに戻すと絞り込みが解除される', async ({ page }) => {
     const checkbox = page.locator('[data-testid="include-deleted-checkbox"]');
-    await checkbox.check();
-    await page.waitForTimeout(500);
-    await checkbox.uncheck();
-    await page.waitForTimeout(1000);
+    await Promise.all([
+      mediaApiResponse(page, (u) => u.searchParams.get('include_deleted') === 'true'),
+      checkbox.check(),
+    ]);
+    await Promise.all([
+      mediaApiResponse(page, (u) => !u.searchParams.has('include_deleted')),
+      checkbox.uncheck(),
+    ]);
     await expect(page.locator('img').first()).toBeVisible();
   });
 });
@@ -109,8 +134,10 @@ test.describe('作成日フィルタ', () => {
 
   test('未来日付の created_from を設定すると0件になる', async ({ page }) => {
     const fromInput = page.locator('[data-testid="created-from-input"]');
-    await fromInput.fill('2099-01-01');
-    await page.waitForTimeout(1500);
+    await Promise.all([
+      mediaApiResponse(page, (u) => u.searchParams.has('created_from')),
+      fromInput.fill('2099-01-01'),
+    ]);
 
     const imgCount = await page.locator('img').count();
     expect(imgCount).toBe(0);
@@ -118,8 +145,10 @@ test.describe('作成日フィルタ', () => {
 
   test('古い日付の created_to を設定すると0件になる', async ({ page }) => {
     const toInput = page.locator('[data-testid="created-to-input"]');
-    await toInput.fill('2000-01-01');
-    await page.waitForTimeout(1500);
+    await Promise.all([
+      mediaApiResponse(page, (u) => u.searchParams.has('created_to')),
+      toInput.fill('2000-01-01'),
+    ]);
 
     const imgCount = await page.locator('img').count();
     expect(imgCount).toBe(0);
@@ -127,11 +156,15 @@ test.describe('作成日フィルタ', () => {
 
   test('リセットボタンで日付フィルタが解除される', async ({ page }) => {
     const fromInput = page.locator('[data-testid="created-from-input"]');
-    await fromInput.fill('2099-01-01');
-    await page.waitForTimeout(500);
+    await Promise.all([
+      mediaApiResponse(page, (u) => u.searchParams.has('created_from')),
+      fromInput.fill('2099-01-01'),
+    ]);
 
-    await page.locator('[data-testid="filter-reset-btn"]').click();
-    await page.waitForTimeout(1000);
+    await Promise.all([
+      mediaApiResponse(page, (u) => !u.searchParams.has('created_from')),
+      page.locator('[data-testid="filter-reset-btn"]').click(),
+    ]);
 
     await expect(page.locator('img').first()).toBeVisible();
   });
@@ -145,13 +178,21 @@ test.describe('フィルターリセット', () => {
 
   test('リセットボタンで全フィルターがクリアされる', async ({ page }) => {
     const select = page.locator('[data-testid="media-type-select"]');
-    await select.selectOption('image');
     const checkbox = page.locator('[data-testid="include-deleted-checkbox"]');
-    await checkbox.check();
-    await page.waitForTimeout(300);
 
-    await page.locator('[data-testid="filter-reset-btn"]').click();
-    await page.waitForTimeout(1000);
+    await Promise.all([
+      mediaApiResponse(page, (u) => u.searchParams.get('media_type') === 'image'),
+      select.selectOption('image'),
+    ]);
+    await Promise.all([
+      mediaApiResponse(page, (u) => u.searchParams.get('include_deleted') === 'true'),
+      checkbox.check(),
+    ]);
+
+    await Promise.all([
+      mediaApiResponse(page, (u) => !u.searchParams.has('media_type') && !u.searchParams.has('include_deleted')),
+      page.locator('[data-testid="filter-reset-btn"]').click(),
+    ]);
 
     await expect(select).toHaveValue('');
     await expect(checkbox).not.toBeChecked();
@@ -186,7 +227,6 @@ test.describe('タグフィルタポップアップ', () => {
 
     // 外クリックで閉じる
     await page.mouse.click(10, 10);
-    await page.waitForTimeout(300);
     await expect(page.locator('[data-testid="tag-filter-popup"]')).not.toBeVisible();
   });
 
@@ -247,7 +287,7 @@ test.describe('ナビゲーション（ギャラリーからタグページ）',
 test.describe('ソート機能', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForSelector('img', { timeout: 15_000 });
   });
 
   test('ソートフィールドセレクトが表示される', async ({ page }) => {
@@ -293,21 +333,22 @@ test.describe('ソート機能', () => {
       }
     });
 
-    // 短時間で連続切替
+    // 短時間で連続切替:
+    // step1: original_filename（即座に切替、レスポンス待機なし）
+    // step2: created_at（レスポンスまで待機して、waitForResponse がステール応答を拾わないようにする）
+    // step3: original_filename（最終値、レスポンスを待機して React 再レンダリング前のデータを取得）
     await sortBySelect.selectOption('original_filename');
-    await sortBySelect.selectOption('created_at');
-    await sortBySelect.selectOption('original_filename');
+    await Promise.all([
+      mediaApiResponse(page, (u) => u.searchParams.get('sort_by') === 'created_at'),
+      sortBySelect.selectOption('created_at'),
+    ]);
+    const [finalRes] = await Promise.all([
+      mediaApiResponse(page, (u) => u.searchParams.get('sort_by') === 'original_filename'),
+      sortBySelect.selectOption('original_filename'),
+    ]);
 
     // 最終選択値が反映されていることを確認
     await expect(sortBySelect).toHaveValue('original_filename');
-
-    // ネットワークが落ち着くまで待機
-    // React はスケジューラ（macrotask）経由で再レンダリングするため、
-    // selectOption 直後は API リクエストがまだ発行されていない。
-    // 少し待って React がリクエストを開始できる時間を確保してから networkidle を確認する。
-    await page.waitForTimeout(300);
-    await page.waitForLoadState('networkidle');
-    await expect(page.locator('[data-testid="sort-by-select"]')).toHaveValue('original_filename');
 
     // 最後の API リクエストが正しいソート条件（sort_by=original_filename）で発行されていること
     expect(lastSortBy).toBe('original_filename');
@@ -316,6 +357,17 @@ test.describe('ソート機能', () => {
     // DOM の実表示順（[data-filename] 属性）と API レスポンス順の両方で検証する。
     // localeCompare ではなく API を正とすることで PostgreSQL の照合順序と一致させる。
     // DOM と API が一致しない場合、競合レスポンスによる表示順崩れを検知できる。
+
+    // レスポンスから先頭ファイル名を取得し、DOM の再レンダリング完了を待機する
+    const finalData = await finalRes.json();
+    const firstExpectedFilename: string | undefined = finalData.items[0]?.original_filename;
+    if (firstExpectedFilename) {
+      await expect(page.locator('[data-filename]').first()).toHaveAttribute(
+        'data-filename',
+        firstExpectedFilename
+      );
+    }
+
     const thumbs = page.locator('[data-filename]');
     const firstFilenames = await thumbs.evaluateAll(
       (els: Element[]) => els.slice(0, 5).map((el) => el.getAttribute('data-filename') ?? '')
@@ -413,9 +465,8 @@ test.describe('フィルタ変更直後スクロール競合テスト (#24)', ()
     // フィルタ変更後の media_type=image リクエストを待機
     await imageFilterRequestPromise;
 
-    // 観測ウィンドウ: 最初のリクエスト到達直後に遅れて発火する旧条件リクエストも収集できるよう
-    // networkidle まで待機してから検証する。これにより「少し遅れた offset>0 旧条件リクエスト」を取りこぼさない。
-    await page.waitForLoadState('networkidle');
+    // 遅れて発火する旧条件リクエストも収集できるよう、フィルタ変更後のレスポンスを待機してから検証する
+    await mediaApiResponse(page, (u) => u.searchParams.get('media_type') === 'image');
 
     // 検証1: フィルタ変更後に media_type=image + offset=0 のリクエストが ≥1 回あること（テスト意図の明示）
     const initialFilterRequests = postFilterRequests.filter(
