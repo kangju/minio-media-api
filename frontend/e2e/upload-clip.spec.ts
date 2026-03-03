@@ -13,7 +13,7 @@ test.describe.configure({ mode: 'serial' });
 test.describe('アップロード → 非同期CLIP', () => {
   test('アップロードするとモーダルがすぐに閉じる', async ({ page }) => {
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: 'UPLOAD' }).waitFor({ timeout: 15_000 });
 
     // テスト用画像がなければスキップ
     const testFile = TEST_IMAGE_CANDIDATES.find((f) => fs.existsSync(f));
@@ -30,9 +30,9 @@ test.describe('アップロード → 非同期CLIP', () => {
       page.locator('text=ファイルをドロップ、またはクリックして選択').click(),
     ]);
     await fileChooser.setFiles(testFile);
-    await page.waitForTimeout(500);
-
     const uploadBtn = page.getByRole('button', { name: /^UPLOAD/ }).last();
+    await expect(uploadBtn).toBeEnabled();
+
     await uploadBtn.click();
 
     // 旧：CLIPが完了するまで待機（最大90秒）が不要に
@@ -161,8 +161,6 @@ test.describe('アップロード → 非同期CLIP', () => {
       },
       { timeout: 90_000 }
     ).catch(() => {});
-
-    await page.waitForTimeout(1000);
 
     // APIでclip_status確認
     const mediaRes = await request.get(`/api/media/${mediaId}`);
