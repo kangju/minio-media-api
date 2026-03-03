@@ -120,15 +120,56 @@ def claim_pending(limit: int) -> list[int]:
 
 
 def _get_media_info(media_id: int) -> Optional[dict]:
-    """メディアの minio_key と retry_count を取得する。"""
+    """メディアの minio_key と retry_count と file_hash を取得する。"""
     with engine.connect() as conn:
         row = conn.execute(
-            text("SELECT minio_key, retry_count FROM media WHERE id = :id"),
+            text("SELECT minio_key, retry_count, file_hash FROM media WHERE id = :id"),
             {"id": media_id},
         ).fetchone()
     if not row:
         return None
-    return {"minio_key": row[0], "retry_count": row[1]}
+    return {"minio_key": row[0], "retry_count": row[1], "file_hash": row[2]}
+
+
+def _find_cached_clip_tags_by_hash(
+    file_hash: str, exclude_media_id: int
+) -> list[dict]:
+    """同一 file_hash で clip_status='done' の別メディアから source='clip' タグを返す。
+
+    サブクエリで「clip タグを持つ done メディア」を1件に絞ってから JOIN することで、
+    件数が増えても実行時間が一定に保たれる。
+
+    Returns:
+        list[dict]: [{"name": str, "score": float|None}] のリスト（score 降順）。
+                    キャッシュなしの場合は空リスト。
+    """
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("""
+                SELECT t.name, mt.score
+                FROM media_tags mt
+                JOIN tags t ON t.id = mt.tag_id
+                WHERE mt.media_id = (
+                    SELECT m.id FROM media m
+                    WHERE m.file_hash = :hash
+                      AND m.clip_status = 'done'
+                      AND m.id != :exclude_id
+                      AND EXISTS (
+                          SELECT 1 FROM media_tags mt2
+                          WHERE mt2.media_id = m.id
+                            AND mt2.source = 'clip'
+                      )
+                    ORDER BY m.id
+                    LIMIT 1
+                )
+                  AND mt.source = 'clip'
+                ORDER BY mt.score DESC NULLS LAST, t.name
+                LIMIT :top_k
+            """),
+            {"hash": file_hash, "exclude_id": exclude_media_id,
+             "top_k": settings.clip_top_k},
+        ).fetchall()
+    return [{"name": r[0], "score": r[1]} for r in rows]
 
 
 @functools.lru_cache(maxsize=None)
@@ -272,10 +313,11 @@ def _analyze(image_data: bytes, candidates: list[str]) -> list[dict]:
 def run_clip_task(media_id: int) -> None:
     """DB キューから取得したメディアに対して CLIP 解析を実行する。
 
-    1. DB からメディア情報取得（minio_key, retry_count）
-    2. MinIO から画像取得
-    3. CLIP 推論（_clip_semaphore で同時実行制限）
-    4. 成功: タグ保存 + clip_status='done'
+    1. DB からメディア情報取得（minio_key, retry_count, file_hash）
+    2. 同一 file_hash の done メディアがあればタグをコピーしてスキップ
+    3. MinIO から画像取得
+    4. CLIP 推論（_clip_semaphore で同時実行制限）
+    5. 成功: タグ保存 + clip_status='done'
        失敗: retry_count += 1, リトライ上限以内なら 'pending', 超過なら 'error'
 
     Args:
@@ -288,6 +330,25 @@ def run_clip_task(media_id: int) -> None:
         return
     minio_key = info["minio_key"]
     retry_count = info["retry_count"]
+    file_hash = info["file_hash"]
+
+    # ① キャッシュチェック（同一 file_hash の done メディアからタグをコピー）
+    # file_hash が空の場合はスキップ（スキーマ上 NOT NULL だが防衛的に確認）
+    if file_hash:
+        cached_tags = _find_cached_clip_tags_by_hash(file_hash, exclude_media_id=media_id)
+        if cached_tags:
+            logger.info(
+                "CLIP キャッシュヒット: media_id=%s hash=%s tags=%d件",
+                media_id, file_hash, len(cached_tags),
+            )
+            try:
+                _save_clip_tags(media_id, cached_tags)
+                _set_status(media_id, "done")
+                logger.info("CLIP キャッシュ適用完了: media_id=%s", media_id)
+            except Exception as exc:
+                logger.error("CLIP キャッシュ保存エラー: media_id=%s %s", media_id, exc)
+                _set_status(media_id, "error", error_detail=f"{type(exc).__name__}: {exc}")
+            return
 
     # ② MinIO から画像取得
     minio = _get_minio()

@@ -352,3 +352,175 @@ class TestSaveClipTags:
         assert row is not None, "CLIP タグが保存されていること"
         assert row[0] == "clip"
         assert row[1] == pytest.approx(0.85)
+
+
+# ---------------------------------------------------------------------------
+# TestCacheHitSkipAnalyze
+# ---------------------------------------------------------------------------
+
+class TestCacheHitSkipAnalyze:
+    """同一 file_hash キャッシュヒット時の再解析スキップテスト。"""
+
+    @pytest.fixture(autouse=True)
+    def _setup_model(self, mock_clip_model):
+        pass
+
+    def test_cache_hit_skips_analyze_and_marks_done(self, db_engine, minio_client):
+        """同一 file_hash の done メディアがあれば _analyze を呼ばずに done になること。"""
+        shared_hash = "shared_hash_001"
+        key_done = f"test/{uuid.uuid4()}.jpg"
+        upload_test_image(minio_client, key_done)
+        mid_done = insert_media(db_engine, minio_key=key_done,
+                                clip_status="done", file_hash=shared_hash)
+        with db_engine.connect() as conn:
+            conn.execute(text("INSERT INTO tags (name, created_at) VALUES ('cat', now()) ON CONFLICT (name) DO NOTHING"))
+            tag_id = conn.execute(text("SELECT id FROM tags WHERE name='cat'")).scalar()
+            conn.execute(
+                text("INSERT INTO media_tags (media_id, tag_id, source, score) VALUES (:mid, :tid, 'clip', 0.9)"),
+                {"mid": mid_done, "tid": tag_id}
+            )
+            conn.commit()
+
+        key_new = f"test/{uuid.uuid4()}.jpg"
+        upload_test_image(minio_client, key_new)
+        mid_new = insert_media(db_engine, minio_key=key_new,
+                               clip_status="running", file_hash=shared_hash)
+
+        with patch("processor._analyze") as mock_analyze:
+            run_clip_task(mid_new)
+            mock_analyze.assert_not_called()
+
+        with db_engine.connect() as conn:
+            status = conn.execute(
+                text("SELECT clip_status FROM media WHERE id=:id"), {"id": mid_new}
+            ).scalar()
+            tag_count = conn.execute(
+                text("SELECT COUNT(*) FROM media_tags WHERE media_id=:mid AND source='clip'"),
+                {"mid": mid_new}
+            ).scalar()
+        assert status == "done"
+        assert tag_count == 1
+
+    def test_cache_miss_runs_analyze(self, db_engine, minio_client):
+        """同一 file_hash の done メディアがなければ _analyze が呼ばれること。"""
+        key = f"test/{uuid.uuid4()}.jpg"
+        upload_test_image(minio_client, key)
+        mid = insert_media(db_engine, minio_key=key, clip_status="running",
+                           file_hash="unique_hash_no_cache")
+
+        with patch("processor._analyze", return_value=[]) as mock_analyze:
+            run_clip_task(mid)
+            mock_analyze.assert_called_once()
+
+    def test_cache_hit_no_clip_tags_runs_analyze(self, db_engine, minio_client):
+        """同一 file_hash の done メディアがあっても clip タグが0件なら _analyze が呼ばれること。
+        （done メディアに user タグしかない場合など）"""
+        shared_hash = "shared_hash_no_clip"
+        key_done = f"test/{uuid.uuid4()}.jpg"
+        upload_test_image(minio_client, key_done)
+        mid_done = insert_media(db_engine, minio_key=key_done,
+                                clip_status="done", file_hash=shared_hash)
+        with db_engine.connect() as conn:
+            conn.execute(text("INSERT INTO tags (name, created_at) VALUES ('cat', now()) ON CONFLICT (name) DO NOTHING"))
+            tag_id = conn.execute(text("SELECT id FROM tags WHERE name='cat'")).scalar()
+            conn.execute(
+                text("INSERT INTO media_tags (media_id, tag_id, source, score) VALUES (:mid, :tid, 'user', NULL)"),
+                {"mid": mid_done, "tid": tag_id}
+            )
+            conn.commit()
+
+        key_new = f"test/{uuid.uuid4()}.jpg"
+        upload_test_image(minio_client, key_new)
+        mid_new = insert_media(db_engine, minio_key=key_new,
+                               clip_status="running", file_hash=shared_hash)
+
+        with patch("processor._analyze", return_value=[]) as mock_analyze:
+            run_clip_task(mid_new)
+            mock_analyze.assert_called_once()  # clip タグなし → キャッシュミス → _analyze 呼ばれる
+
+    def test_cache_source_only_uses_clip_tags(self, db_engine, minio_client):
+        """キャッシュコピー対象が source='clip' のみで source='user' は含まれないこと。"""
+        shared_hash = "shared_hash_002"
+        key_done = f"test/{uuid.uuid4()}.jpg"
+        upload_test_image(minio_client, key_done)
+        mid_done = insert_media(db_engine, minio_key=key_done,
+                                clip_status="done", file_hash=shared_hash)
+        with db_engine.connect() as conn:
+            for name in ("cat", "dog"):
+                conn.execute(text("INSERT INTO tags (name, created_at) VALUES (:n, now()) ON CONFLICT (name) DO NOTHING"), {"n": name})
+            cat_id = conn.execute(text("SELECT id FROM tags WHERE name='cat'")).scalar()
+            dog_id = conn.execute(text("SELECT id FROM tags WHERE name='dog'")).scalar()
+            conn.execute(
+                text("INSERT INTO media_tags (media_id, tag_id, source, score) VALUES (:mid, :tid, 'clip', 0.9)"),
+                {"mid": mid_done, "tid": cat_id}
+            )
+            conn.execute(
+                text("INSERT INTO media_tags (media_id, tag_id, source, score) VALUES (:mid, :tid, 'user', NULL)"),
+                {"mid": mid_done, "tid": dog_id}
+            )
+            conn.commit()
+
+        key_new = f"test/{uuid.uuid4()}.jpg"
+        upload_test_image(minio_client, key_new)
+        mid_new = insert_media(db_engine, minio_key=key_new,
+                               clip_status="running", file_hash=shared_hash)
+
+        with patch("processor._analyze") as mock_analyze:
+            run_clip_task(mid_new)
+            mock_analyze.assert_not_called()
+
+        with db_engine.connect() as conn:
+            rows = conn.execute(
+                text("""
+                    SELECT t.name FROM media_tags mt
+                    JOIN tags t ON t.id = mt.tag_id
+                    WHERE mt.media_id = :mid
+                """),
+                {"mid": mid_new}
+            ).fetchall()
+        names = {r[0] for r in rows}
+        assert "cat" in names      # clip タグはコピーされる
+        assert "dog" not in names  # user タグはコピーされない
+
+    def test_cache_does_not_use_own_hash(self, db_engine, minio_client):
+        """自分自身の file_hash はキャッシュ候補に含まれないこと（exclude_media_id 確認）。"""
+        key = f"test/{uuid.uuid4()}.jpg"
+        upload_test_image(minio_client, key)
+        mid = insert_media(db_engine, minio_key=key,
+                           clip_status="running", file_hash="self_ref_hash_003")
+
+        with patch("processor._analyze", return_value=[]) as mock_analyze:
+            run_clip_task(mid)
+            mock_analyze.assert_called_once()  # キャッシュミス → _analyze 呼ばれる
+
+    def test_cache_save_error_sets_status_error(self, db_engine, minio_client):
+        """キャッシュヒット時に _save_clip_tags が例外を投げたら clip_status='error' になること。"""
+        shared_hash = "shared_hash_004"
+        key_done = f"test/{uuid.uuid4()}.jpg"
+        upload_test_image(minio_client, key_done)
+        mid_done = insert_media(db_engine, minio_key=key_done,
+                                clip_status="done", file_hash=shared_hash)
+        with db_engine.connect() as conn:
+            conn.execute(text("INSERT INTO tags (name, created_at) VALUES ('cat', now()) ON CONFLICT (name) DO NOTHING"))
+            tag_id = conn.execute(text("SELECT id FROM tags WHERE name='cat'")).scalar()
+            conn.execute(
+                text("INSERT INTO media_tags (media_id, tag_id, source, score) VALUES (:mid, :tid, 'clip', 0.9)"),
+                {"mid": mid_done, "tid": tag_id}
+            )
+            conn.commit()
+
+        key_new = f"test/{uuid.uuid4()}.jpg"
+        upload_test_image(minio_client, key_new)
+        mid_new = insert_media(db_engine, minio_key=key_new,
+                               clip_status="running", file_hash=shared_hash)
+
+        with patch("processor._save_clip_tags", side_effect=RuntimeError("DB error")):
+            run_clip_task(mid_new)
+
+        with db_engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT clip_status, error_detail FROM media WHERE id=:id"),
+                {"id": mid_new}
+            ).fetchone()
+        assert row[0] == "error"
+        assert row[1] is not None

@@ -38,7 +38,7 @@ class WorkerSettings(BaseSettings):
     """DB をポーリングする間隔（秒）。"""
     clip_max_retry: int = 3
     """CLIP 失敗時の最大リトライ回数。超過で clip_status='error'。"""
-    clip_max_concurrent: int = 4
+    clip_max_concurrent: int = 1
     """同時 CLIP 推論数（semaphore サイズ）。"""
 
 

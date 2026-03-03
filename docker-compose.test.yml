@@ -173,6 +173,12 @@ services:
       CLIP_PROMPT_TEMPLATE: "a photo of a {tag}"
       CLIP_SCORE_THRESHOLD: "0.2"
       CLIP_TOP_K: "10"
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
+      TORCH_NUM_THREADS: "1"
+    cpus: "1.0"
     volumes:
       - clip_worker_e2e_model_cache:/root/.cache
     restart: unless-stopped
