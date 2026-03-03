@@ -13,21 +13,31 @@ const SEED_NAMES = [
 /**
  * Docker E2E 用グローバルセットアップ:
  * sort テストが依存する seed-aaa〜seed-eee が存在しない場合のみアップロードする。
- * total 件数ではなくファイル名で確認することで、既存データの混在による不安定を防ぐ。
+ * タグ依存をやめ original_filename で判定することで、タグAPI変更の影響を受けない。
  */
 async function globalSetup() {
   const baseURL = process.env.PW_BASE_URL || 'http://localhost:3000';
   const ctx = await request.newContext({ baseURL });
 
-  // e2e-seed タグで絞り込んで seed ファイルの存在確認（件数が100超でも安全）
-  const listRes = await ctx.get('/api/media?tag=e2e-seed&limit=10');
+  // タグ条件なしで全件をページネーションし、SEED_NAMES に含まれるファイル名をクライアント側で抽出
   const existingNames = new Set<string>();
-  if (listRes.ok()) {
-    const data = await listRes.json();
-    for (const item of data.items ?? []) {
-      existingNames.add(item.original_filename);
+  const pageLimit = 100;
+  let offset = 0;
+  outer: while (true) {
+    const res = await ctx.get(`/api/media?limit=${pageLimit}&offset=${offset}`);
+    if (!res.ok()) break;
+    const data = await res.json();
+    const items: Array<{ original_filename: string }> = data.items ?? [];
+    for (const item of items) {
+      if (SEED_NAMES.includes(item.original_filename)) {
+        existingNames.add(item.original_filename);
+        if (existingNames.size === SEED_NAMES.length) break outer;
+      }
     }
+    if (items.length < pageLimit) break;
+    offset += pageLimit;
   }
+  console.log(`[global-setup] Found ${existingNames.size}/${SEED_NAMES.length} seed files already exist.`);
 
   // seed-aaa〜seed-eee がすべて揃っていればスキップ
   const missing = SEED_NAMES.filter((n) => !existingNames.has(n));
