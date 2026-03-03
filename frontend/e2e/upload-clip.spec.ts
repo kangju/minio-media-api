@@ -1,7 +1,11 @@
 import { test, expect } from '@playwright/test';
 import fs from 'fs';
+import * as path from 'path';
 
-const TEST_IMAGE = '/Users/kangju/program/minio-image-api/frontend/public/test-image.jpg';
+const TEST_IMAGE_CANDIDATES = [
+  path.join(__dirname, '..', 'public', 'test-image.jpg'),
+  path.join(__dirname, '..', 'public', 'favicon.ico'),
+];
 
 // テストはシリアル実行
 test.describe.configure({ mode: 'serial' });
@@ -12,14 +16,10 @@ test.describe('アップロード → 非同期CLIP', () => {
     await page.waitForLoadState('networkidle');
 
     // テスト用画像がなければスキップ
-    let testFile = TEST_IMAGE;
-    if (!fs.existsSync(testFile)) {
-      // public/favicon.icoでも可
-      testFile = '/Users/kangju/program/minio-image-api/frontend/public/favicon.ico';
-      if (!fs.existsSync(testFile)) {
-        test.skip(true, 'テスト用ファイルが見つからないためスキップ');
-        return;
-      }
+    const testFile = TEST_IMAGE_CANDIDATES.find((f) => fs.existsSync(f));
+    if (!testFile) {
+      test.skip(true, 'テスト用ファイルが見つからないためスキップ');
+      return;
     }
 
     await page.getByRole('button', { name: 'UPLOAD' }).click();
