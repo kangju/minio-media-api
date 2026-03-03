@@ -15,6 +15,18 @@ MinIO・PostgreSQL・FastAPI を使用した画像・動画アップロード AP
 - Docker
 - Docker Compose
 
+## 必須環境変数
+
+以下の環境変数は **必須** です。未設定のままアプリを起動しようとするとバリデーションエラーで即時停止します。
+
+| 変数名 | 説明 |
+|--------|------|
+| `MINIO_ACCESS_KEY` | MinIO アクセスキー |
+| `MINIO_SECRET_KEY` | MinIO シークレットキー |
+| `DATABASE_URL` | PostgreSQL 接続 URL（例: `postgresql://user:pass@host:5432/db`） |
+
+`.env.example` をコピーして値を設定してください。
+
 ## セットアップ
 
 1. 環境変数ファイルを作成する:

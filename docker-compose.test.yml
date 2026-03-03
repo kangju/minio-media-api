@@ -78,7 +78,7 @@ services:
       CORS_ALLOW_METHODS: "*"
       CORS_ALLOW_HEADERS: "*"
     command: >
-      sh -c "cd /app && python -m pytest tests/ -v --tb=short"
+      sh -c "cd /app && python -m pytest tests/ tests_config/ -v --tb=short --maxfail=1 --disable-warnings"
     volumes:
       - model_test_cache:/root/.cache
 
