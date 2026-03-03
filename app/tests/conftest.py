@@ -17,7 +17,8 @@ from minio import Minio
 from sqlalchemy import create_engine, text
 
 import models  # noqa: F401 - モデルを Base に登録するために必要
-from config import load_default_vocabulary, settings
+from settings_schema import load_default_vocabulary
+from config import settings
 from database import Base
 
 
