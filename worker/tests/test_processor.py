@@ -524,3 +524,135 @@ class TestCacheHitSkipAnalyze:
             ).fetchone()
         assert row[0] == "error"
         assert row[1] is not None
+
+
+# ---------------------------------------------------------------------------
+# TestErrorDetailClear
+# ---------------------------------------------------------------------------
+
+class TestErrorDetailClear:
+    """再試行成功・pending 遷移時に error_detail がクリアされることを確認するテスト。"""
+
+    @pytest.fixture(autouse=True)
+    def _setup_model(self, mock_clip_model):
+        pass
+
+    def _set_error_detail(self, db_engine, media_id: int, detail: str) -> None:
+        """テスト用に error_detail を直接セットするヘルパー。"""
+        with db_engine.connect() as conn:
+            conn.execute(
+                text("UPDATE media SET error_detail = :d WHERE id = :id"),
+                {"d": detail, "id": media_id},
+            )
+            conn.commit()
+
+    def test_error_detail_cleared_on_retry_success(self, db_engine, minio_client):
+        """失敗後に CLIP 解析が成功したとき error_detail が NULL になること。"""
+        key = f"test/{uuid.uuid4()}.jpg"
+        upload_test_image(minio_client, key)
+        mid = insert_media(db_engine, minio_key=key, clip_status="running")
+        self._set_error_detail(db_engine, mid, "RuntimeError: previous failure")
+
+        with db_engine.connect() as conn:
+            conn.execute(text("INSERT INTO tags (name, created_at) VALUES ('cat', now()) ON CONFLICT (name) DO NOTHING"))
+            conn.commit()
+
+        with patch("processor._analyze", return_value=[{"name": "cat", "score": 0.9}]):
+            run_clip_task(mid)
+
+        with db_engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT clip_status, error_detail FROM media WHERE id = :id"),
+                {"id": mid},
+            ).fetchone()
+        assert row[0] == "done"
+        assert row[1] is None, "成功後は error_detail が NULL であること"
+
+    def test_error_detail_cleared_on_pending_retry(self, db_engine, minio_client):
+        """CLIP エラー（リトライ上限未満）で pending になるとき error_detail が NULL になること。"""
+        key = f"test/{uuid.uuid4()}.jpg"
+        upload_test_image(minio_client, key)
+        mid = insert_media(db_engine, minio_key=key, clip_status="running", retry_count=0)
+        self._set_error_detail(db_engine, mid, "RuntimeError: previous failure")
+
+        with patch("processor._analyze", side_effect=RuntimeError("CLIP error")):
+            run_clip_task(mid)
+
+        with db_engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT clip_status, retry_count, error_detail FROM media WHERE id = :id"),
+                {"id": mid},
+            ).fetchone()
+        assert row[0] == "pending"
+        assert row[1] == 1
+        assert row[2] is None, "pending 遷移後は error_detail が NULL であること"
+
+    def test_error_detail_cleared_on_minio_error_pending(self, db_engine):
+        """MinIO エラーで pending になるとき error_detail が NULL になること。"""
+        mid = insert_media(db_engine, minio_key="nonexistent/key.jpg",
+                           clip_status="running", retry_count=0)
+        self._set_error_detail(db_engine, mid, "RuntimeError: previous failure")
+
+        run_clip_task(mid)
+
+        with db_engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT clip_status, retry_count, error_detail FROM media WHERE id = :id"),
+                {"id": mid},
+            ).fetchone()
+        assert row[0] == "pending"
+        assert row[1] == 1
+        assert row[2] is None, "MinIO エラー後の pending 遷移でも error_detail が NULL であること"
+
+    def test_error_detail_preserved_on_error(self, db_engine, minio_client):
+        """リトライ上限到達でエラー確定のとき error_detail が設定されること（既存挙動確認）。"""
+        from config import settings
+        key = f"test/{uuid.uuid4()}.jpg"
+        upload_test_image(minio_client, key)
+        mid = insert_media(db_engine, minio_key=key, clip_status="running",
+                           retry_count=settings.clip_max_retry - 1)
+
+        with patch("processor._analyze", side_effect=RuntimeError("CLIP fatal")):
+            run_clip_task(mid)
+
+        with db_engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT clip_status, error_detail FROM media WHERE id = :id"),
+                {"id": mid},
+            ).fetchone()
+        assert row[0] == "error"
+        assert row[1] is not None, "error 確定時は error_detail が残ること"
+
+    def test_error_detail_cleared_on_cache_hit_success(self, db_engine, minio_client):
+        """キャッシュヒットで done になるとき error_detail が NULL になること。"""
+        shared_hash = "shared_hash_clear_error"
+        key_done = f"test/{uuid.uuid4()}.jpg"
+        upload_test_image(minio_client, key_done)
+        mid_done = insert_media(db_engine, minio_key=key_done,
+                                clip_status="done", file_hash=shared_hash)
+        with db_engine.connect() as conn:
+            conn.execute(text("INSERT INTO tags (name, created_at) VALUES ('cat', now()) ON CONFLICT (name) DO NOTHING"))
+            tag_id = conn.execute(text("SELECT id FROM tags WHERE name='cat'")).scalar()
+            conn.execute(
+                text("INSERT INTO media_tags (media_id, tag_id, source, score) VALUES (:mid, :tid, 'clip', 0.9)"),
+                {"mid": mid_done, "tid": tag_id},
+            )
+            conn.commit()
+
+        key_new = f"test/{uuid.uuid4()}.jpg"
+        upload_test_image(minio_client, key_new)
+        mid_new = insert_media(db_engine, minio_key=key_new,
+                               clip_status="running", file_hash=shared_hash)
+        self._set_error_detail(db_engine, mid_new, "RuntimeError: previous failure")
+
+        with patch("processor._analyze") as mock_analyze:
+            run_clip_task(mid_new)
+            mock_analyze.assert_not_called()
+
+        with db_engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT clip_status, error_detail FROM media WHERE id = :id"),
+                {"id": mid_new},
+            ).fetchone()
+        assert row[0] == "done"
+        assert row[1] is None, "キャッシュヒット成功後も error_detail が NULL であること"

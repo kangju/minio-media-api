@@ -213,6 +213,8 @@ def _set_status(media_id: int, status: str,
     if error_detail is not None:
         sets.append("error_detail = :error_detail")
         params["error_detail"] = error_detail
+    elif status != "error":
+        sets.append("error_detail = NULL")
     if retry_count is not None:
         sets.append("retry_count = :retry_count")
         params["retry_count"] = retry_count
