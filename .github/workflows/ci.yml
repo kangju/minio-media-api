@@ -89,3 +89,164 @@ jobs:
       - run: npm ci
       - name: Run ESLint
         run: npm run lint
+
+  e2e-filters:
+    name: E2E filters & general
+    runs-on: ubuntu-latest
+    env:
+      TEST_POSTGRES_USER: ci_test_user
+      TEST_POSTGRES_PASSWORD: ci_test_password
+      TEST_POSTGRES_DB: ci_test_db
+      TEST_MINIO_USER: ci_test_minio
+      TEST_MINIO_PASSWORD: ci_test_minio_password
+      E2E_POSTGRES_USER: ci_e2e_user
+      E2E_POSTGRES_PASSWORD: ci_e2e_password
+      E2E_POSTGRES_DB: ci_e2e_db
+      E2E_MINIO_USER: ci_e2e_minio
+      E2E_MINIO_PASSWORD: ci_e2e_minio_password
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet \
+                      /usr/local/lib/android \
+                      /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL \
+                      /usr/local/share/boost \
+                      "$AGENT_TOOLSDIRECTORY"
+          df -h
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - name: Install Python dependencies
+        run: pip install pillow
+      - name: Start E2E services
+        run: |
+          for attempt in 1 2 3; do
+            echo "=== Attempt $attempt ==="
+            docker compose -f docker-compose.test.yml up -d --build \
+              api-server-test frontend-e2e clip-worker-e2e && break
+            if [ "$attempt" = "3" ]; then
+              echo "All docker compose up attempts failed"
+              exit 1
+            fi
+            echo "Attempt $attempt failed. Tearing down and retrying in 15s..."
+            docker compose -f docker-compose.test.yml down -v 2>/dev/null || true
+            sleep 15
+          done
+      - name: Wait for frontend
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:3001 && break || sleep 5
+          done
+          curl -sf http://localhost:3001 || { echo "frontend did not start in time"; exit 1; }
+      - name: Run Playwright (e2e project)
+        run: npx playwright test --project=e2e
+        working-directory: frontend
+        env:
+          PW_BASE_URL: http://localhost:3001
+      - name: Teardown
+        if: always()
+        run: docker compose -f docker-compose.test.yml down -v
+
+  e2e-bulk-upload:
+    name: E2E bulk-upload
+    runs-on: ubuntu-latest
+    env:
+      TEST_POSTGRES_USER: ci_test_user
+      TEST_POSTGRES_PASSWORD: ci_test_password
+      TEST_POSTGRES_DB: ci_test_db
+      TEST_MINIO_USER: ci_test_minio
+      TEST_MINIO_PASSWORD: ci_test_minio_password
+      E2E_POSTGRES_USER: ci_e2e_user
+      E2E_POSTGRES_PASSWORD: ci_e2e_password
+      E2E_POSTGRES_DB: ci_e2e_db
+      E2E_MINIO_USER: ci_e2e_minio
+      E2E_MINIO_PASSWORD: ci_e2e_minio_password
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet \
+                      /usr/local/lib/android \
+                      /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL \
+                      /usr/local/share/boost \
+                      "$AGENT_TOOLSDIRECTORY"
+          df -h
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - name: Install Python dependencies
+        run: pip install pillow
+      - name: Start E2E services
+        run: |
+          for attempt in 1 2 3; do
+            echo "=== Attempt $attempt ==="
+            docker compose -f docker-compose.test.yml up -d --build \
+              api-server-test frontend-e2e clip-worker-e2e && break
+            if [ "$attempt" = "3" ]; then
+              echo "All docker compose up attempts failed"
+              exit 1
+            fi
+            echo "Attempt $attempt failed. Tearing down and retrying in 15s..."
+            docker compose -f docker-compose.test.yml down -v 2>/dev/null || true
+            sleep 15
+          done
+      - name: Wait for frontend
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:3001 && break || sleep 5
+          done
+          curl -sf http://localhost:3001 || { echo "frontend did not start in time"; exit 1; }
+      - name: Warm up CLIP model
+        run: |
+          # 最小の JPEG ファイルを作成（PIL 不要、標準ライブラリのみ使用）
+          python3 -c 'import base64; open("/tmp/warmup.jpg","wb").write(base64.b64decode("/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AJQAB/9k="))' && echo "JPEG created: $(ls -la /tmp/warmup.jpg)" || echo "JPEG creation failed"
+          # ダミー画像をアップロードして CLIP モデルのロードを事前に完了させる
+          # -f を外してデバッグ情報を取得、MIME タイプを明示的に指定
+          # Next.js プロキシを経由せず FastAPI に直接アップロード（localhost:8001）
+          UPLOAD_RESP=$(curl -s --max-time 30 -X POST http://localhost:8001/api/media \
+            -F "file=@/tmp/warmup.jpg;type=image/jpeg" 2>&1 || echo "curl_failed")
+          echo "Upload response: ${UPLOAD_RESP:0:200}"
+          MEDIA_ID=$(echo "$UPLOAD_RESP" | python3 -c \
+            "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+          if [ -z "$MEDIA_ID" ]; then
+            echo "Warmup upload failed (API unavailable or rejected), continuing anyway"
+          else
+            echo "Warmup image uploaded: $MEDIA_ID"
+            for i in $(seq 1 36); do
+              STATUS=$(curl -sf "http://localhost:8001/api/media/$MEDIA_ID" 2>/dev/null | \
+                python3 -c \
+                "import sys,json; print(json.load(sys.stdin).get('clip_status',''))" 2>/dev/null || echo "")
+              if [ "$STATUS" = "done" ] || [ "$STATUS" = "error" ]; then
+                echo "CLIP warmup complete (status: $STATUS)"
+                break
+              fi
+              echo "Waiting for CLIP model... attempt $i (status: $STATUS)"
+              sleep 5
+            done
+          fi
+      - name: Run Playwright (e2e-bulk-upload project)
+        run: npx playwright test --project=e2e-bulk-upload
+        working-directory: frontend
+        env:
+          PW_BASE_URL: http://localhost:3001
+      - name: Teardown
+        if: always()
+        run: docker compose -f docker-compose.test.yml down -v
+

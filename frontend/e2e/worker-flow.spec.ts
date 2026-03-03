@@ -82,6 +82,6 @@ open('${testFilePath}', 'wb').write(buf.getvalue())
       if (!res.ok()) return 'error';
       const data = await res.json();
       return data.clip_status;
-    }, { timeout: 60_000, intervals: [3_000] }).toBe('done');
+    }, { timeout: 120_000, intervals: [3_000] }).toBe('done');
   });
 });

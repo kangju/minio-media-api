@@ -13,6 +13,15 @@ export default defineConfig({
     video: 'off',
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    {
+      name: 'e2e',
+      testIgnore: ['**/bulk-upload.spec.ts'],
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'e2e-bulk-upload',
+      testMatch: ['**/bulk-upload.spec.ts'],
+      use: { ...devices['Desktop Chrome'] },
+    },
   ],
 });

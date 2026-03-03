@@ -141,8 +141,7 @@ test.describe('作成日フィルタ', () => {
       fromInput.fill('2099-01-01'),
     ]);
 
-    const imgCount = await page.locator('img').count();
-    expect(imgCount).toBe(0);
+    await expect(page.locator('img')).toHaveCount(0);
   });
 
   test('古い日付の created_to を設定すると0件になる', async ({ page }) => {
@@ -152,8 +151,7 @@ test.describe('作成日フィルタ', () => {
       toInput.fill('2000-01-01'),
     ]);
 
-    const imgCount = await page.locator('img').count();
-    expect(imgCount).toBe(0);
+    await expect(page.locator('img')).toHaveCount(0);
   });
 
   test('リセットボタンで日付フィルタが解除される', async ({ page }) => {
