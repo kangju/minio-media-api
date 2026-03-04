@@ -174,6 +174,9 @@ docker compose --env-file .env.test -f docker-compose.test.yml down -v
 
 ### E2E テスト（Playwright）
 
+> **必須**: `PW_BASE_URL` 環境変数が未設定の場合、E2E テストは起動時に失敗します。
+> 必ずフロントエンドの URL を指定してください。
+
 ```bash
 docker compose --env-file .env.test -f docker-compose.test.yml up -d --build api-server-test frontend-e2e clip-worker-e2e
 cd frontend && PW_BASE_URL=http://localhost:3001 npx playwright test
