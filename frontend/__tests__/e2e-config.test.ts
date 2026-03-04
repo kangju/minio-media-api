@@ -3,6 +3,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import type { FullConfig } from '@playwright/test';
 import { resolveBaseURL } from '../e2e/global-setup';
 
 const E2E_DIR = path.join(__dirname, '..', 'e2e');
@@ -26,7 +27,7 @@ describe('resolveBaseURL', () => {
     const config = {
       projects: [{ use: { baseURL: 'http://ci-host:3001' } }],
       use: { baseURL: 'http://fallback:3000' },
-    } as any;
+    } as unknown as FullConfig;
     expect(resolveBaseURL(config)).toBe('http://ci-host:3001');
   });
 
@@ -34,12 +35,12 @@ describe('resolveBaseURL', () => {
     const config = {
       projects: [],
       use: { baseURL: 'http://fallback:3000' },
-    } as any;
+    } as unknown as FullConfig;
     expect(resolveBaseURL(config)).toBe('http://fallback:3000');
   });
 
   it('baseURL が未設定のとき Error を throw する', () => {
-    const config = { projects: [], use: {} } as any;
+    const config = { projects: [], use: {} } as unknown as FullConfig;
     expect(() => resolveBaseURL(config)).toThrow('[global-setup] baseURL が未設定');
   });
 });
