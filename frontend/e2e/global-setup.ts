@@ -1,4 +1,4 @@
-import { request } from '@playwright/test';
+import { FullConfig, request } from '@playwright/test';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -10,13 +10,22 @@ const SEED_NAMES = [
   'seed-eee.jpg',
 ];
 
+/** baseURL を FullConfig から解決する（テスト可能な純粋関数）。 */
+export function resolveBaseURL(config: FullConfig): string {
+  const baseURL = config.projects[0]?.use.baseURL;
+  if (!baseURL) {
+    throw new Error('[global-setup] baseURL が未設定です。PW_BASE_URL 環境変数を設定してください。');
+  }
+  return baseURL;
+}
+
 /**
  * Docker E2E 用グローバルセットアップ:
  * sort テストが依存する seed-aaa〜seed-eee が存在しない場合のみアップロードする。
  * タグ依存をやめ original_filename で判定することで、タグAPI変更の影響を受けない。
  */
-async function globalSetup() {
-  const baseURL = process.env.PW_BASE_URL || 'http://localhost:3000';
+async function globalSetup(config: FullConfig) {
+  const baseURL = resolveBaseURL(config);
   const ctx = await request.newContext({ baseURL });
 
   // タグ条件なしで全件をページネーションし、SEED_NAMES に含まれるファイル名をクライアント側で抽出
