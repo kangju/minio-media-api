@@ -12,7 +12,7 @@ const SEED_NAMES = [
 
 /** baseURL を FullConfig から解決する（テスト可能な純粋関数）。 */
 export function resolveBaseURL(config: FullConfig): string {
-  const baseURL = config.projects[0]?.use.baseURL ?? config.use.baseURL;
+  const baseURL = config.projects[0]?.use.baseURL;
   if (!baseURL) {
     throw new Error('[global-setup] baseURL が未設定です。PW_BASE_URL 環境変数を設定してください。');
   }

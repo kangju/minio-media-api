@@ -31,12 +31,9 @@ describe('resolveBaseURL', () => {
     expect(resolveBaseURL(config)).toBe('http://ci-host:3001');
   });
 
-  it('projects が空のとき config.use.baseURL にフォールバックする', () => {
-    const config = {
-      projects: [],
-      use: { baseURL: 'http://fallback:3000' },
-    } as unknown as FullConfig;
-    expect(resolveBaseURL(config)).toBe('http://fallback:3000');
+  it('projects が空のとき Error を throw する', () => {
+    const config = { projects: [] } as unknown as FullConfig;
+    expect(() => resolveBaseURL(config)).toThrow('[global-setup] baseURL が未設定');
   });
 
   it('baseURL が未設定のとき Error を throw する', () => {
