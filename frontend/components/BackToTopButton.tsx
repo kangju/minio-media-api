@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 interface BackToTopButtonProps {
   /** このref要素が画面から見えなくなったらボタンを表示する */

@@ -27,7 +27,7 @@ export default function Home() {
   } = useMediaFetch(filter, sentinelRef);
   const {
     selectMode, setSelectMode,
-    selectedIds, setSelectedIds,
+    selectedIds,
     handleSelect, handleSelectAll, exitSelectMode,
   } = useSelectMode(items);
 

@@ -64,7 +64,7 @@ export default function UploadModal({ onClose, onUploaded }: UploadModalProps) {
     async function uploadOne(idx: number) {
       const file = items[idx].file;
       try {
-        const result = await uploadMedia(file, tagList);
+        await uploadMedia(file, tagList);
         setItems((prev) =>
           prev.map((it, i) => (i === idx ? { ...it, status: 'done' } : it))
         );
@@ -86,7 +86,7 @@ export default function UploadModal({ onClose, onUploaded }: UploadModalProps) {
         inFlight.add(idx);
         results.push(uploadOne(idx));
       }
-      await Promise.race(results.filter((_, i) => {
+      await Promise.race(results.filter(() => {
         // 完了済みを除外しながら待機
         return true;
       }));
