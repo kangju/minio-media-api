@@ -32,6 +32,7 @@ test.describe('ISSUE #53: MinIO 画像表示スモーク', () => {
     await expect(img).toBeVisible();
     const src = await img.getAttribute('src');
     expect(src).toBeTruthy();
-    expect(src).toMatch(/(\/_next\/image|http)/);
+    // Environment can render either next/image proxy path, absolute URL, or backend API path.
+    expect(src).toMatch(/(\/_next\/image|https?:\/\/|\/api\/media\/\d+\/file)/);
   });
 });
